@@ -25,10 +25,14 @@ import {
   TrendingUp,
   Trash2,
   UserPlus,
+  Radio,
+  FlaskConical,
 } from "lucide-react";
 import { filterNumeric, filterInt, formatKRW } from "@/utils/numberInput";
 
 /* ── Types ── */
+
+export type GameMode = "standalone" | "canonical";
 
 interface SetupAgent {
   id: string;
@@ -47,7 +51,7 @@ interface SetupAgent {
 }
 
 interface Props {
-  onStart: (agents: Agent[], assets: Asset[]) => void;
+  onStart: (agents: Agent[], assets: Asset[], mode: GameMode) => void;
 }
 
 /* ── Helpers ── */
@@ -68,6 +72,7 @@ export default function SetupScreen({ onStart }: Props) {
   const [agents, setAgents] = useState<SetupAgent[]>(buildDefault);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [editingAsset, setEditingAsset] = useState<string | null>(null);
+  const [mode, setMode] = useState<GameMode>("standalone");
 
   const selected = agents[selectedIdx];
   const enabledAgents = agents.filter((a) => a.enabled);
@@ -168,7 +173,7 @@ export default function SetupScreen({ onStart }: Props) {
     const finalAssets: Asset[] = DEFAULT_ASSETS.map((a) => ({
       symbol: a.symbol, name: a.name, price: a.price, change24h: 0, volume: 0, priceHistory: [a.price],
     }));
-    onStart(finalAgents, finalAssets);
+    onStart(finalAgents, finalAssets, mode);
   };
 
   const totalValue = useMemo(() => {
@@ -193,6 +198,31 @@ export default function SetupScreen({ onStart }: Props) {
           <Fish size={14} className="text-[#c8a84e]" />
           <span className="text-[12px] font-bold text-[#e8dcc8] tracking-wide">Prepare Carefully</span>
           <div className="flex-1" />
+          {/* Mode toggle: standalone (mock/8100) vs canonical live reverie */}
+          <div className="flex items-center gap-0.5 bg-[#1a1612] border border-[#3d3428]/50 rounded-[4px] p-0.5">
+            <button
+              onClick={() => setMode("standalone")}
+              className={`flex items-center gap-1 px-2 py-[3px] rounded-[3px] text-[9px] font-semibold transition cursor-pointer ${
+                mode === "standalone"
+                  ? "bg-[#c8a84e]/15 text-[#c8a84e]"
+                  : "text-[#5a5040] hover:text-[#b8a880]"
+              }`}
+            >
+              <FlaskConical size={9} />
+              스탠드얼론
+            </button>
+            <button
+              onClick={() => setMode("canonical")}
+              className={`flex items-center gap-1 px-2 py-[3px] rounded-[3px] text-[9px] font-semibold transition cursor-pointer ${
+                mode === "canonical"
+                  ? "bg-[#5B8C3E]/20 text-[#7bbf5a]"
+                  : "text-[#5a5040] hover:text-[#b8a880]"
+              }`}
+            >
+              <Radio size={9} />
+              라이브(정석)
+            </button>
+          </div>
           <span className="text-[9px] text-[#4a4238] font-mono">
             {enabledAgents.length} / {agents.length}
           </span>
