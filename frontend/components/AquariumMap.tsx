@@ -9,6 +9,7 @@ const PhaserGame = dynamic(() => import("./PhaserGame"), { ssr: false });
 export interface AquariumMapHandle {
   zoomIn: () => void;
   zoomOut: () => void;
+  setSpeed: (speed: number) => void;
 }
 
 const AquariumMap = forwardRef<AquariumMapHandle, { agents: Agent[]; onSelectAgent: (a: Agent) => void }>(

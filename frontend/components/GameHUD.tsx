@@ -32,6 +32,8 @@ interface Props {
   boardNotifications: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  speed: number;
+  onSpeedChange: (speed: number) => void;
 }
 
 function Badge({ count }: { count: number }) {
@@ -60,6 +62,8 @@ export default function GameHUD({
   boardNotifications,
   onZoomIn,
   onZoomOut,
+  speed,
+  onSpeedChange,
 }: Props) {
   const [eventOpen, setEventOpen] = useState(false);
   const [eventText, setEventText] = useState("");
@@ -136,6 +140,25 @@ export default function GameHUD({
             >
               <SkipForward size={14} />
             </button>
+          </div>
+
+          <div className="w-px h-7 bg-border-light mx-1" />
+
+          {/* Speed */}
+          <div className="flex items-center gap-0.5">
+            {[1, 2, 4].map((s) => (
+              <button
+                key={s}
+                onClick={() => onSpeedChange(s)}
+                className={`h-7 px-1.5 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                  speed === s
+                    ? "bg-accent-green/15 text-accent-green"
+                    : "text-text-tertiary hover:text-text-secondary hover:bg-surface-secondary"
+                }`}
+              >
+                {s}x
+              </button>
+            ))}
           </div>
 
           <div className="w-px h-7 bg-border-light mx-1" />

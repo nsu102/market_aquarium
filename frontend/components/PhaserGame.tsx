@@ -51,6 +51,14 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
         cam.setZoom(Phaser.Math.Clamp(cam.zoom - 0.15, 0.3, 3));
       }
     },
+    setSpeed: (speed: number) => {
+      const scene = gameRef.current?.scene.scenes[0];
+      if (scene) {
+        scene.time.timeScale = speed;
+        scene.physics.world.timeScale = 1 / speed;
+        scene.anims.globalTimeScale = speed;
+      }
+    },
   }));
   const onSelectAgentRef = useRef(onSelectAgent);
   onSelectAgentRef.current = onSelectAgent;

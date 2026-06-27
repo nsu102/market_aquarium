@@ -34,7 +34,13 @@ export default function Home() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [posts, setPosts] = useState(initialPosts);
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
+  const [speed, setSpeed] = useState(1);
   const mapRef = useRef<AquariumMapHandle>(null);
+
+  const handleSpeedChange = useCallback((s: number) => {
+    setSpeed(s);
+    mapRef.current?.setSpeed(s);
+  }, []);
 
   const handleStart = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
     setAgents(setupAgents);
@@ -116,6 +122,8 @@ export default function Home() {
         boardNotifications={posts.length}
         onZoomIn={() => mapRef.current?.zoomIn()}
         onZoomOut={() => mapRef.current?.zoomOut()}
+        speed={speed}
+        onSpeedChange={handleSpeedChange}
       />
 
       {/* Market panel - floating left, content-fit */}
@@ -140,7 +148,6 @@ export default function Home() {
       {reportOpen && (
         <RoundReport
           report={currentReport}
-          events={events.filter((e) => e.round === currentRound)}
           onClose={() => setReportOpen(false)}
         />
       )}
