@@ -32,6 +32,45 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+/** Binary min-heap keyed by numeric priority (used by A*). */
+class MinHeap<T> {
+  private items: { node: T; pri: number }[] = [];
+  get size(): number {
+    return this.items.length;
+  }
+  push(node: T, pri: number): void {
+    this.items.push({ node, pri });
+    let i = this.items.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.items[p].pri <= this.items[i].pri) break;
+      [this.items[p], this.items[i]] = [this.items[i], this.items[p]];
+      i = p;
+    }
+  }
+  pop(): T | undefined {
+    const n = this.items.length;
+    if (n === 0) return undefined;
+    const top = this.items[0];
+    const last = this.items.pop()!;
+    if (n > 1) {
+      this.items[0] = last;
+      let i = 0;
+      for (;;) {
+        let s = i;
+        const l = 2 * i + 1;
+        const r = 2 * i + 2;
+        if (l < this.items.length && this.items[l].pri < this.items[s].pri) s = l;
+        if (r < this.items.length && this.items[r].pri < this.items[s].pri) s = r;
+        if (s === i) break;
+        [this.items[s], this.items[i]] = [this.items[i], this.items[s]];
+        i = s;
+      }
+    }
+    return top.node;
+  }
+}
+
 const SPAWN_POSITIONS: Record<string, { x: number; y: number }> = {
   panic:      { x: 2400, y: 1120 },
   fomo:       { x: 1344, y: 1760 },
@@ -113,6 +152,11 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
         actionBubble: Phaser.GameObjects.Container | null;
       }[] = [];
 
+      /** Tile walkability grid built from the "Collisions" layer. */
+      walkable: boolean[][] = [];
+      mapWidth = 0;
+      mapHeight = 0;
+
       constructor() {
         super("MainScene");
       }
@@ -187,12 +231,19 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
           "Collisions",
         ];
 
+        let collisionsLayer: Phaser.Tilemaps.TilemapLayerBase | null = null;
         for (const name of layerNames) {
           const layer = map.createLayer(name, tilesets);
           if (layer && name === "Collisions") {
             layer.setVisible(false);
+            collisionsLayer = layer;
           }
         }
+
+        // Build the walkability grid for client-side A* pathfinding.
+        this.mapWidth = map.width;
+        this.mapHeight = map.height;
+        this.buildWalkable(collisionsLayer);
 
         // Create per-agent walk animations
         // Spritesheet layout: row0=down(front), row1=left, row2=right, row3=up(back), 3 frames each
@@ -319,6 +370,178 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
         });
       }
 
+      /**
+       * Build walkable[y][x] from the Collisions layer: a tile is BLOCKED where
+       * the layer has a real tile (index > 0). If the layer is missing, warn and
+       * treat everything as walkable so movement still works.
+       */
+      buildWalkable(layer: Phaser.Tilemaps.TilemapLayerBase | null) {
+        this.walkable = [];
+        if (!layer) {
+          console.warn(
+            "[PhaserGame] 'Collisions' layer not found; treating all tiles as walkable"
+          );
+          for (let y = 0; y < this.mapHeight; y++) {
+            const row: boolean[] = new Array(this.mapWidth).fill(true);
+            this.walkable.push(row);
+          }
+          return;
+        }
+        const data = layer.layer.data;
+        for (let y = 0; y < this.mapHeight; y++) {
+          const row: boolean[] = [];
+          for (let x = 0; x < this.mapWidth; x++) {
+            const tile = data[y]?.[x];
+            row.push(!(tile && tile.index > 0));
+          }
+          this.walkable.push(row);
+        }
+      }
+
+      inBounds(x: number, y: number): boolean {
+        return x >= 0 && y >= 0 && x < this.mapWidth && y < this.mapHeight;
+      }
+
+      /**
+       * Nearest walkable tile to (tx, ty), searched outward BFS-style. When a
+       * `claimed` set is provided, skips (and records) already-taken tiles so
+       * each agent gets a distinct standing spot. Falls back to (tx, ty).
+       */
+      findWalkableTile(
+        tx: number,
+        ty: number,
+        claimed?: Set<string>
+      ): { x: number; y: number } {
+        const queue: Array<[number, number]> = [[tx, ty]];
+        const seen = new Set<string>([`${tx},${ty}`]);
+        const dirs = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const;
+        while (queue.length) {
+          const [x, y] = queue.shift()!;
+          const key = `${x},${y}`;
+          if (this.inBounds(x, y) && this.walkable[y][x] && !claimed?.has(key)) {
+            claimed?.add(key);
+            return { x, y };
+          }
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx;
+            const ny = y + dy;
+            const nk = `${nx},${ny}`;
+            if (!seen.has(nk) && this.inBounds(nx, ny)) {
+              seen.add(nk);
+              queue.push([nx, ny]);
+            }
+          }
+        }
+        return { x: tx, y: ty };
+      }
+
+      /**
+       * 4-directional A* over the walkability grid. Returns the list of tiles
+       * from start..goal (inclusive). If the goal is blocked it is retargeted to
+       * the nearest walkable tile; if no path exists it falls back to
+       * [start, goal] so the caller never hangs.
+       */
+      aStar(
+        sx: number,
+        sy: number,
+        gx: number,
+        gy: number
+      ): Array<{ x: number; y: number }> {
+        if (!this.inBounds(sx, sy)) {
+          return [
+            { x: sx, y: sy },
+            { x: gx, y: gy },
+          ];
+        }
+        if (!this.inBounds(gx, gy) || !this.walkable[gy][gx]) {
+          const near = this.findWalkableTile(gx, gy);
+          gx = near.x;
+          gy = near.y;
+        }
+        if (sx === gx && sy === gy) return [{ x: sx, y: sy }];
+
+        const W = this.mapWidth;
+        const startId = sy * W + sx;
+        const goalId = gy * W + gx;
+        const h = (x: number, y: number) => Math.abs(x - gx) + Math.abs(y - gy);
+
+        const open = new MinHeap<number>();
+        const gScore = new Map<number, number>();
+        const came = new Map<number, number>();
+        const closed = new Set<number>();
+        gScore.set(startId, 0);
+        open.push(startId, h(sx, sy));
+
+        const dirs = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const;
+
+        while (open.size) {
+          const cur = open.pop()!;
+          if (closed.has(cur)) continue;
+          closed.add(cur);
+
+          if (cur === goalId) {
+            const path: Array<{ x: number; y: number }> = [];
+            let c: number | undefined = cur;
+            while (c !== undefined) {
+              const px = c % W;
+              const py = (c - px) / W;
+              path.push({ x: px, y: py });
+              if (c === startId) break;
+              c = came.get(c);
+            }
+            path.reverse();
+            return path;
+          }
+
+          const cx = cur % W;
+          const cy = (cur - cx) / W;
+          const g = gScore.get(cur)!;
+          for (const [dx, dy] of dirs) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (!this.inBounds(nx, ny) || !this.walkable[ny][nx]) continue;
+            const nId = ny * W + nx;
+            if (closed.has(nId)) continue;
+            const ng = g + 1;
+            if (ng < (gScore.get(nId) ?? Infinity)) {
+              gScore.set(nId, ng);
+              came.set(nId, cur);
+              open.push(nId, ng + h(nx, ny));
+            }
+          }
+        }
+
+        // No path found.
+        return [
+          { x: sx, y: sy },
+          { x: gx, y: gy },
+        ];
+      }
+
+      /** Pick a nearby walkable wander target around an agent's home. */
+      randomWanderTarget(homeX: number, homeY: number): { x: number; y: number } {
+        for (let i = 0; i < 6; i++) {
+          const tx = homeX + (Math.random() - 0.5) * WANDER_RADIUS * 2;
+          const ty = homeY + (Math.random() - 0.5) * WANDER_RADIUS * 2;
+          const cx = Math.floor(tx / TILE_SIZE);
+          const cy = Math.floor(ty / TILE_SIZE);
+          if (this.inBounds(cx, cy) && this.walkable[cy]?.[cx]) {
+            return { x: tx, y: ty };
+          }
+        }
+        return { x: homeX, y: homeY };
+      }
+
       /** Drive a directional walk animation toward (dx, dy). */
       playWalk(a: typeof this.agentSprites[number], dx: number, dy: number) {
         const id = a.agent.id;
@@ -369,11 +592,16 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
        */
       playRound(actions: RoundAction[]) {
         const now = this.time.now;
-        const board = zonePixel("board");
-        const exchange = zonePixel("exchange");
-        // Center on the tile and fan agents out in a ring so they don't stack.
-        const cx = TILE_SIZE / 2;
-        const total = this.agentSprites.length || 1;
+        const boardPx = zonePixel("board");
+        const exchangePx = zonePixel("exchange");
+        const boardTile = {
+          x: Math.floor(boardPx.x / TILE_SIZE),
+          y: Math.floor(boardPx.y / TILE_SIZE),
+        };
+        const exchangeTile = {
+          x: Math.floor(exchangePx.x / TILE_SIZE),
+          y: Math.floor(exchangePx.y / TILE_SIZE),
+        };
 
         // Clean restart: drop any in-flight scripts + bubbles.
         for (const a of this.agentSprites) {
@@ -382,30 +610,64 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
           this.clearActionBubble(a);
         }
 
+        // Distinct walkable standing tiles per zone so agents don't stack and
+        // never stop on a blocked tile.
+        const boardClaimed = new Set<string>();
+        const exchangeClaimed = new Set<string>();
+
         actions.forEach((action, i) => {
           const a = this.agentSprites.find((s) => s.agent.id === action.agent_id);
           if (!a) return; // agent not rendered on this map
           if (!action.posted && !action.traded) return; // nothing to show
 
-          const ang = (i / total) * Math.PI * 2;
-          const offX = Math.cos(ang) * 56;
-          const offY = Math.sin(ang) * 56;
-
           const script: Waypoint[] = [];
+          let curX = Math.floor(a.sprite.x / TILE_SIZE);
+          let curY = Math.floor(a.sprite.y / TILE_SIZE);
+
+          // Append the A* path from the current tile to (gx, gy) as a sequence
+          // of pixel waypoints. Only the final waypoint holds + fires onArrive.
+          const appendPath = (
+            gx: number,
+            gy: number,
+            hold: number,
+            onArrive?: () => void
+          ) => {
+            const path = this.aStar(curX, curY, gx, gy);
+            if (path.length <= 1) {
+              script.push({
+                x: gx * TILE_SIZE + TILE_SIZE / 2,
+                y: gy * TILE_SIZE + TILE_SIZE / 2,
+                hold,
+                onArrive,
+              });
+            } else {
+              for (let k = 1; k < path.length; k++) {
+                const p = path[k];
+                const last = k === path.length - 1;
+                script.push({
+                  x: p.x * TILE_SIZE + TILE_SIZE / 2,
+                  y: p.y * TILE_SIZE + TILE_SIZE / 2,
+                  hold: last ? hold : 0,
+                  onArrive: last ? onArrive : undefined,
+                });
+              }
+              const end = path[path.length - 1];
+              gx = end.x;
+              gy = end.y;
+            }
+            curX = gx;
+            curY = gy;
+          };
 
           if (action.posted) {
-            script.push({
-              x: board.x + cx + offX,
-              y: board.y + cx + offY,
-              hold: 1600,
-              onArrive: () => {
-                const t = action.post_text?.trim();
-                this.showActionBubble(
-                  a,
-                  t && t.length ? truncate(t, 40) : "게시글 작성",
-                  0x6c8cff
-                );
-              },
+            const t = this.findWalkableTile(boardTile.x, boardTile.y, boardClaimed);
+            appendPath(t.x, t.y, 1600, () => {
+              const txt = action.post_text?.trim();
+              this.showActionBubble(
+                a,
+                txt && txt.length ? truncate(txt, 40) : "게시글 작성",
+                0x6c8cff
+              );
             });
           }
 
@@ -416,23 +678,20 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
               action.trade_symbol != null
                 ? `${action.trade_action} ${action.trade_symbol}`
                 : action.trade_action;
-            script.push({
-              x: exchange.x + cx + offX,
-              y: exchange.y + cx + offY,
-              hold: 1400,
-              onArrive: () => {
-                this.showActionBubble(a, label, isBuy ? 0x2fbf71 : 0xe5484d);
-              },
+            const t = this.findWalkableTile(
+              exchangeTile.x,
+              exchangeTile.y,
+              exchangeClaimed
+            );
+            appendPath(t.x, t.y, 1400, () => {
+              this.showActionBubble(a, label, isBuy ? 0x2fbf71 : 0xe5484d);
             });
           }
 
           // Return home and resume idle wander.
-          script.push({
-            x: a.homeX,
-            y: a.homeY,
-            hold: 0,
-            onArrive: () => this.clearActionBubble(a),
-          });
+          const homeTileX = Math.floor(a.homeX / TILE_SIZE);
+          const homeTileY = Math.floor(a.homeY / TILE_SIZE);
+          appendPath(homeTileX, homeTileY, 0, () => this.clearActionBubble(a));
 
           a.script = script;
           a.scriptIdx = 0;
@@ -468,8 +727,11 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
                 body.setVelocity(0, 0);
                 if (!wp.arrived) {
                   wp.arrived = true;
-                  a.sprite.anims.stop();
-                  a.sprite.setFrame(0);
+                  // Only break stride on a real hold; pass through path tiles.
+                  if (wp.hold > 0) {
+                    a.sprite.anims.stop();
+                    a.sprite.setFrame(0);
+                  }
                   wp.onArrive?.();
                   a.holdUntil = now + wp.hold;
                 }
@@ -479,8 +741,11 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
                     // Routine finished -> resume wandering near home.
                     a.script = null;
                     a.scriptIdx = 0;
-                    a.targetX = a.homeX + (Math.random() - 0.5) * WANDER_RADIUS * 2;
-                    a.targetY = a.homeY + (Math.random() - 0.5) * WANDER_RADIUS * 2;
+                    a.sprite.anims.stop();
+                    a.sprite.setFrame(0);
+                    const t = this.randomWanderTarget(a.homeX, a.homeY);
+                    a.targetX = t.x;
+                    a.targetY = t.y;
                   }
                 }
               } else {
@@ -503,8 +768,9 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
           if (dist < 4) {
             // Pick new target
             body.setVelocity(0, 0);
-            a.targetX = a.homeX + (Math.random() - 0.5) * WANDER_RADIUS * 2;
-            a.targetY = a.homeY + (Math.random() - 0.5) * WANDER_RADIUS * 2;
+            const t = this.randomWanderTarget(a.homeX, a.homeY);
+            a.targetX = t.x;
+            a.targetY = t.y;
             a.sprite.anims.stop();
             a.sprite.setFrame(0);
           } else {
