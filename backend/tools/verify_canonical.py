@@ -22,26 +22,32 @@ from pathlib import Path
 
 # The reverie engine uses imports + relative paths rooted at backend_server.
 _BS = Path(__file__).resolve().parents[2] / "reverie" / "backend_server"
+_REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BS))
 os.chdir(_BS)
 
+
+def _load_dotenv() -> None:
+    """Load KEY=VALUE lines from repo-root .env into os.environ (no dependency)."""
+    env_path = _REPO / ".env"
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_dotenv()
+LIVE = bool(os.environ.get("OPENROUTER_API_KEY"))
+print(f"=== mode: {'FULL LIVE (real LLM)' if LIVE else 'OFFLINE (stubbed LLM)'} ===")
+
 import utils  # noqa: E402
 utils.debug = False  # silence the engine's prompt dump
-
-# --- mock openai at the source: instant, offline, deterministic fallbacks ---
-import openai  # noqa: E402
-
-
-def _fake_chat(*args, **kwargs):
-    return {"choices": [{"message": {"content": ""}}]}
-
-
-def _fake_embed(*args, **kwargs):
-    return {"data": [{"embedding": [0.0] * 8}]}
-
-
-openai.ChatCompletion.create = _fake_chat  # type: ignore
-openai.Embedding.create = _fake_embed  # type: ignore
+# utils read the key at import; refresh from env in case .env was just loaded.
+utils.openai_api_key = os.environ.get("OPENROUTER_API_KEY", utils.openai_api_key)
 
 # engine imports (cwd must be reverie/backend_server)
 from maze import Maze  # noqa: E402
@@ -50,24 +56,27 @@ from persona.cognitive_modules import plan as _plan  # noqa: E402
 from persona.cognitive_modules import perceive as _perceive  # noqa: E402
 import market_bridge as mb  # noqa: E402
 
-# reverie's own LLM parsers require REAL model text (they return None on empty
-# output). For a key-less headless proof we stub the engine's generators with
-# canned valid values so cognition runs offline. With a real OPENROUTER_API_KEY
-# you would NOT stub these -- the engine runs them for real.
-_plan.generate_wake_up_hour = lambda persona: 6
-_plan.generate_first_daily_plan = lambda persona, wake: ["wake up", "watch the markets", "rest"]
-_plan.generate_hourly_schedule = lambda persona, wake: [
-    ["sleeping", 360], ["morning routine", 120], ["watching the markets", 480],
-    ["lunch", 60], ["watching the markets", 360], ["sleeping", 60]]
-_plan.generate_action_sector = lambda *a: "Hobbs Cafe"
-_plan.generate_action_arena = lambda *a: "cafe"
-_plan.generate_action_game_object = lambda *a: "cafe customer seating"
-_plan.generate_action_pronunciatio = lambda *a: "."
-_plan.generate_action_event_triple = lambda act, persona: (persona.scratch.name, "is", "active")
-_plan.generate_act_obj_desc = lambda obj, act, persona: "in use"
-_plan.generate_act_obj_event_triple = lambda obj, desc, persona: (obj, "is", "used")
-_plan.generate_task_decomp = lambda persona, desc, dur: [[desc, dur]]
-_perceive.generate_poig_score = lambda persona, etype, desc: 3
+if not LIVE:
+    # OFFLINE proof: mock openai + stub reverie generators (their parsers return
+    # None on empty output). With a key these are NOT applied -- engine runs real.
+    import openai
+
+    openai.ChatCompletion.create = lambda *a, **k: {"choices": [{"message": {"content": ""}}]}
+    openai.Embedding.create = lambda *a, **k: {"data": [{"embedding": [0.0] * 8}]}
+    _plan.generate_wake_up_hour = lambda persona: 6
+    _plan.generate_first_daily_plan = lambda persona, wake: ["wake up", "watch the markets", "rest"]
+    _plan.generate_hourly_schedule = lambda persona, wake: [
+        ["sleeping", 360], ["morning routine", 120], ["watching the markets", 480],
+        ["lunch", 60], ["watching the markets", 360], ["sleeping", 60]]
+    _plan.generate_action_sector = lambda *a: "Hobbs Cafe"
+    _plan.generate_action_arena = lambda *a: "cafe"
+    _plan.generate_action_game_object = lambda *a: "cafe customer seating"
+    _plan.generate_action_pronunciatio = lambda *a: "."
+    _plan.generate_action_event_triple = lambda act, persona: (persona.scratch.name, "is", "active")
+    _plan.generate_act_obj_desc = lambda obj, act, persona: "in use"
+    _plan.generate_act_obj_event_triple = lambda obj, desc, persona: (obj, "is", "used")
+    _plan.generate_task_decomp = lambda persona, desc, dur: [[desc, dur]]
+    _perceive.generate_poig_score = lambda persona, etype, desc: 3
 
 REPO = Path(__file__).resolve().parents[2]
 SIM = REPO / "environment" / "frontend_server" / "storage" / "base_the_ville_market6"
@@ -81,7 +90,8 @@ def main() -> None:
     tile = (start["x"], start["y"])
 
     persona = Persona(NAME, str(SIM / "personas" / NAME))
-    persona.reflect = lambda: None  # skip reflection (LLM) for the offline proof
+    if not LIVE:
+        persona.reflect = lambda: None  # skip reflection (LLM) for the offline proof
     ctx = mb.init_context([NAME])
     ctx.set_event("대형 거래소 해킹 루머가 퍼졌다", is_rumor=True, timestamp="Day1 06:00")
 

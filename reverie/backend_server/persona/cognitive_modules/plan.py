@@ -638,7 +638,7 @@ def _determine_action(persona, maze):
   # variables.
   act_world = maze.access_tile(persona.scratch.curr_tile)["world"]
   # Market Aquarium: force our injected board/exchange slots to their exact
-  # the_ville address so grounding does not depend on the LLM (works offline).
+  # the_ville address so grounding is reliable (and key-independent).
   _forced = None
   try:
     import market_bridge
@@ -647,12 +647,8 @@ def _determine_action(persona, maze):
     _forced = None
   if _forced:
     new_address = _forced
-    # derive the address parts from the forced address so downstream object
-    # action generation (act_game_object etc.) still has its inputs.
     _parts = _forced.split(":")
-    act_sector = _parts[1] if len(_parts) > 1 else ""
-    act_arena = _parts[2] if len(_parts) > 2 else ""
-    act_game_object = _parts[3] if len(_parts) > 3 else act_arena
+    act_game_object = _parts[3] if len(_parts) > 3 else (_parts[2] if len(_parts) > 2 else "")
   else:
     # act_sector = maze.access_tile(persona.scratch.curr_tile)["sector"]
     act_sector = generate_action_sector(act_desp, persona, maze)

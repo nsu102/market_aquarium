@@ -129,13 +129,13 @@ def GPT4_safe_generate_response(prompt,
         print (curr_gpt_response)
         print ("~~~~")
 
-    except: 
+    except:
       pass
 
-  return False
+  return fail_safe_response
 
 
-def ChatGPT_safe_generate_response(prompt, 
+def ChatGPT_safe_generate_response(prompt,
                                    example_output,
                                    special_instruction,
                                    repeat=3,
@@ -173,13 +173,13 @@ def ChatGPT_safe_generate_response(prompt,
         print (curr_gpt_response)
         print ("~~~~")
 
-    except: 
+    except:
       pass
 
-  return False
+  return fail_safe_response
 
 
-def ChatGPT_safe_generate_response_OLD(prompt, 
+def ChatGPT_safe_generate_response_OLD(prompt,
                                    repeat=3,
                                    fail_safe_response="error",
                                    func_validate=None,
