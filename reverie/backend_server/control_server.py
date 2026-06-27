@@ -178,6 +178,11 @@ def start(body: StartBody):
 
     try:
       ReverieServer = _get_reverie_server_cls()
+      # Offline fast mode (demo / no API key): stub reverie's LLM generators so
+      # the cognitive loop runs instantly. Must run after reverie is imported.
+      if os.getenv("MARKET_STUB_LLM"):
+        import market_bridge
+        market_bridge.apply_offline_stubs()
       rs = ReverieServer(body.fork_sim_code, body.sim_code)
     except Exception as e:
       STATE.error = str(e)

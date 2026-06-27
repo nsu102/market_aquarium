@@ -220,3 +220,37 @@ def init_context(persona_names: list[str], seed: int = 42, client: LLMClient | N
     ctx = MarketContext(persona_names, seed=seed, client=client)
     set_context(ctx)
     return ctx
+
+
+# --------------------------------------------------------------------------- #
+# Offline fast mode: stub reverie's own LLM generators with canned valid values
+# so the cognitive loop runs instantly without an API key (agents still walk to
+# board/exchange via forced grounding; market actions use the scripted client).
+# Enabled by control_server when MARKET_STUB_LLM is set. Demo/offline only.
+# --------------------------------------------------------------------------- #
+def apply_offline_stubs() -> None:
+    try:
+        import openai
+        openai.ChatCompletion.create = lambda *a, **k: {"choices": [{"message": {"content": ""}}]}
+        openai.Embedding.create = lambda *a, **k: {"data": [{"embedding": [0.0] * 8}]}
+    except Exception:
+        pass
+    try:
+        from persona.cognitive_modules import plan as _p
+        from persona.cognitive_modules import perceive as _pc
+        _p.generate_wake_up_hour = lambda persona: 6
+        _p.generate_first_daily_plan = lambda persona, wake: ["wake up", "watch the markets", "rest"]
+        _p.generate_hourly_schedule = lambda persona, wake: [
+            ["sleeping", 360], ["morning routine", 120], ["watching the markets", 480],
+            ["lunch", 60], ["watching the markets", 360], ["sleeping", 60]]
+        _p.generate_action_sector = lambda *a: "Hobbs Cafe"
+        _p.generate_action_arena = lambda *a: "cafe"
+        _p.generate_action_game_object = lambda *a: "cafe customer seating"
+        _p.generate_action_pronunciatio = lambda *a: "."
+        _p.generate_action_event_triple = lambda act, persona: (persona.scratch.name, "is", "active")
+        _p.generate_act_obj_desc = lambda obj, act, persona: "in use"
+        _p.generate_act_obj_event_triple = lambda obj, desc, persona: (obj, "is", "used")
+        _p.generate_task_decomp = lambda persona, desc, dur: [[desc, dur]]
+        _pc.generate_poig_score = lambda persona, etype, desc: 3
+    except Exception:
+        pass

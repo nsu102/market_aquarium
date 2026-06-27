@@ -72,7 +72,7 @@ export default function SetupScreen({ onStart }: Props) {
   const [agents, setAgents] = useState<SetupAgent[]>(buildDefault);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [editingAsset, setEditingAsset] = useState<string | null>(null);
-  const [mode, setMode] = useState<GameMode>("standalone");
+  const [mode, setMode] = useState<GameMode>("canonical");
 
   const selected = agents[selectedIdx];
   const enabledAgents = agents.filter((a) => a.enabled);
