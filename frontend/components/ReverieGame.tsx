@@ -213,8 +213,11 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
       foregroundL2Layer?.setDepth(2);
 
       // *** CAMERA PLAYER (invisible anchor the camera follows) ***
+      // Camera anchor (arrow-key drivable). Start near the market personas'
+      // spawn cluster so they are on-screen, and zoom in so characters read at a
+      // comfortable size (default zoom 1.0 makes the 32px sprites look tiny).
       player = this.physics.add
-        .sprite(800, 288, "atlas", "down")
+        .sprite(2400, 1600, "atlas", "down")
         .setSize(30, 40)
         .setOffset(0, 0);
       player.setVisible(false);
@@ -222,6 +225,7 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
       const camera = this.cameras.main;
       camera.startFollow(player);
       camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+      camera.setZoom(1.3);
       cursors = this.input.keyboard!.createCursorKeys();
 
       // *** MOUSE NAVIGATION: drag to pan, wheel to zoom ***
