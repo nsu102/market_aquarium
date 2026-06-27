@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import Image from "next/image";
 import { Agent } from "@/mock_data/agents";
 import { Asset } from "@/mock_data/market";
-import { AGENT_PROFILES, DEFAULT_ASSETS, CHARACTER_POOL } from "@/constants/agentProfiles";
+import { AGENT_PROFILES, DEFAULT_ASSETS, CHARACTER_POOL, CUSTOM_COLORS } from "@/constants/agentProfiles";
 import {
   Play,
   Plus,
@@ -26,7 +26,7 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { filterNumeric, filterInt } from "@/utils/numberInput";
+import { filterNumeric, filterInt, formatKRW } from "@/utils/numberInput";
 
 /* ── Types ── */
 
@@ -52,12 +52,6 @@ interface Props {
 
 /* ── Helpers ── */
 
-function formatKRW(n: number) {
-  if (n >= 1e8) return `${(n / 1e8).toFixed(1)}억`;
-  if (n >= 1e4) return `${(n / 1e4).toFixed(0)}만`;
-  return n.toLocaleString();
-}
-
 const CASH_PRESETS = [100000, 500000, 1000000, 5000000, 10000000, 50000000, 100000000, 500000000];
 
 function buildDefault(): SetupAgent[] {
@@ -67,11 +61,6 @@ function buildDefault(): SetupAgent[] {
     sprite: p.sprite, profile: p.profile, traits: p.traits, description: p.description,
   }));
 }
-
-const CUSTOM_COLORS = [
-  "#C85A4A", "#D4A843", "#5B8FB9", "#8B6DB0", "#5B8C3E", "#5BA88C",
-  "#D48A3C", "#7B6BA0", "#4A8B7B", "#B85A6A", "#6B8B4A", "#8B7B3E",
-];
 
 /* ── Component ── */
 

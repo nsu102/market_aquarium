@@ -122,7 +122,7 @@ export const CHARACTER_POOL = [
   { name: "Yuriko_Yamamoto", label: "Yuriko Yamamoto" },
 ];
 
-const CUSTOM_COLORS = [
+export const CUSTOM_COLORS = [
   "#C85A4A", "#D4A843", "#5B8FB9", "#8B6DB0", "#5B8C3E", "#5BA88C",
   "#D48A3C", "#7B6BA0", "#4A8B7B", "#B85A6A", "#6B8B4A", "#8B7B3E",
   "#5A7BC8", "#C87A5A", "#6BAA6B", "#AA6B8B", "#8BAA5B", "#5B6BAA",

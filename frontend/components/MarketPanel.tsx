@@ -14,12 +14,7 @@ import {
   Activity,
   Users,
 } from "lucide-react";
-
-function formatKRW(n: number) {
-  if (n >= 1e8) return `${(n / 1e8).toFixed(1)}억`;
-  if (n >= 1e4) return `${(n / 1e4).toFixed(0)}만`;
-  return n.toLocaleString();
-}
+import { formatKRW } from "@/utils/numberInput";
 
 function MetricBar({
   value,
