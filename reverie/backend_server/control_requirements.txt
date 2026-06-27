@@ -1,0 +1,8 @@
+# Control server dependencies.
+# Install (from reverie/backend_server):
+#   pip install -r control_requirements.txt
+# Run:
+#   uvicorn control_server:app --port 8001
+fastapi
+uvicorn[standard]
+pydantic

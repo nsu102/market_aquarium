@@ -12,15 +12,30 @@ import time
 from utils import *
 
 openai.api_key = openai_api_key
+# Route the SDK through OpenRouter (or any OpenAI-compatible base) if configured.
+try:
+  openai.api_base = openai_api_base
+except NameError:
+  pass
+
+# Chat / embedding model ids (configurable in utils.py).
+try:
+  CHAT_MODEL = gpt_chat_model
+except NameError:
+  CHAT_MODEL = "gpt-3.5-turbo"
+try:
+  EMBEDDING_MODEL = gpt_embedding_model
+except NameError:
+  EMBEDDING_MODEL = "text-embedding-ada-002"
 
 def temp_sleep(seconds=0.1):
   time.sleep(seconds)
 
-def ChatGPT_single_request(prompt): 
+def ChatGPT_single_request(prompt):
   temp_sleep()
 
   completion = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo", 
+    model=CHAT_MODEL,
     messages=[{"role": "user", "content": prompt}]
   )
   return completion["choices"][0]["message"]["content"]
@@ -44,14 +59,14 @@ def GPT4_request(prompt):
   """
   temp_sleep()
 
-  try: 
+  try:
     completion = openai.ChatCompletion.create(
-    model="gpt-4", 
+    model=CHAT_MODEL,
     messages=[{"role": "user", "content": prompt}]
     )
     return completion["choices"][0]["message"]["content"]
-  
-  except: 
+
+  except:
     print ("ChatGPT ERROR")
     return "ChatGPT ERROR"
 
@@ -69,14 +84,14 @@ def ChatGPT_request(prompt):
     a str of GPT-3's response. 
   """
   # temp_sleep()
-  try: 
+  try:
     completion = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo", 
+    model=CHAT_MODEL,
     messages=[{"role": "user", "content": prompt}]
     )
     return completion["choices"][0]["message"]["content"]
-  
-  except: 
+
+  except:
     print ("ChatGPT ERROR")
     return "ChatGPT ERROR"
 
@@ -207,20 +222,29 @@ def GPT_request(prompt, gpt_parameter):
     a str of GPT-3's response. 
   """
   temp_sleep()
-  try: 
-    response = openai.Completion.create(
-                model=gpt_parameter["engine"],
-                prompt=prompt,
+  try:
+    # The legacy text-davinci completion models (gpt_parameter["engine"]) were
+    # deprecated by OpenAI. We route the same request through a chat model
+    # (CHAT_MODEL, e.g. via OpenRouter) instead, mapping the completion params.
+    #
+    # Reasoning chat models (gpt-5.x, etc.) spend tokens on hidden reasoning
+    # before producing visible output, so the tiny limits the original code
+    # used for davinci (5, 15, 50...) leave no room and make the provider
+    # error out. We floor the budget so there is always room to reason + answer.
+    max_tokens = max(int(gpt_parameter["max_tokens"]), 1024)
+    completion = openai.ChatCompletion.create(
+                model=CHAT_MODEL,
+                messages=[{"role": "user", "content": prompt}],
                 temperature=gpt_parameter["temperature"],
-                max_tokens=gpt_parameter["max_tokens"],
+                max_tokens=max_tokens,
                 top_p=gpt_parameter["top_p"],
                 frequency_penalty=gpt_parameter["frequency_penalty"],
                 presence_penalty=gpt_parameter["presence_penalty"],
                 stream=gpt_parameter["stream"],
                 stop=gpt_parameter["stop"],)
-    return response.choices[0].text
-  except: 
-    print ("TOKEN LIMIT EXCEEDED")
+    return completion["choices"][0]["message"]["content"]
+  except Exception as e:
+    print ("GPT_request ERROR:", repr(e)[:200])
     return "TOKEN LIMIT EXCEEDED"
 
 
@@ -273,9 +297,9 @@ def safe_generate_response(prompt,
   return fail_safe_response
 
 
-def get_embedding(text, model="text-embedding-ada-002"):
+def get_embedding(text, model=EMBEDDING_MODEL):
   text = text.replace("\n", " ")
-  if not text: 
+  if not text:
     text = "this is blank"
   return openai.Embedding.create(
           input=[text], model=model)['data'][0]['embedding']

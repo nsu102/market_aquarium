@@ -11,15 +11,24 @@ import SetupScreen from "@/components/SetupScreen";
 import GameHUD from "@/components/GameHUD";
 import { Agent } from "@/mock_data/agents";
 import { Asset, MarketData } from "@/mock_data/market";
-import { posts as initialPosts } from "@/mock_data/posts";
+import { Post, posts as initialPosts } from "@/mock_data/posts";
 import { rounds } from "@/mock_data/rounds";
 import { GameEvent } from "@/mock_data/events";
+import {
+  startGame,
+  submitEvent,
+  getReport,
+  GameState,
+  RoundReportData,
+} from "@/lib/api";
 
 interface ActiveEvent {
   text: string;
   impact: "positive" | "negative" | "neutral";
   source: "user" | "system";
 }
+
+type Connection = "mock" | "backend";
 
 export default function Home() {
   const [gameStarted, setGameStarted] = useState(false);
@@ -31,61 +40,151 @@ export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
-  const [posts, setPosts] = useState(initialPosts);
+  const [posts, setPosts] = useState<Post[]>(initialPosts);
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
+  // Backend wiring state
+  const [connection, setConnection] = useState<Connection>("mock");
+  const [roundReport, setRoundReport] = useState<RoundReportData | null>(null);
+  const [overallMarkdown, setOverallMarkdown] = useState<string | null>(null);
   const mapRef = useRef<AquariumMapHandle>(null);
 
-  const handleStart = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
-    setAgents(setupAgents);
-    setMarketData({
-      assets: setupAssets,
-      fearGreedIndex: 50,
-      rumorSpeed: 0,
-      panicSellRatio: 0,
-      fomoBuyRatio: 0,
-      whaleBuyIntensity: 0,
-      whaleSellIntensity: 0,
-      sentimentContribution: setupAgents.map((a) => ({ agent: a.alias, value: 0 })),
-    });
-    setEvents([]);
-    setPosts([]);
-    setCurrentRound(1);
-    setGameStarted(true);
+  /** Apply a backend GameState snapshot to local UI state. */
+  const applyGameState = useCallback((state: GameState) => {
+    setAgents(state.agents);
+    setMarketData(state.market);
+    setPosts(state.posts);
+    setEvents(state.events);
+    setCurrentRound(state.round);
   }, []);
 
-  const handleEvent = useCallback((text: string) => {
-    const impact: "positive" | "negative" | "neutral" =
-      Math.random() > 0.5 ? "negative" : "positive";
-    const newEvent: GameEvent = {
-      id: `e${Date.now()}`,
-      round: currentRound,
-      text,
-      source: "user",
-      impact,
-      timestamp: new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }),
-    };
-    setEvents((prev) => [newEvent, ...prev]);
-    setPosts((prev) => [
-      {
-        id: `p${Date.now()}`,
-        agentId: "system",
-        agentAlias: "시스템",
-        content: `[속보] ${text}`,
-        likes: 0,
-        comments: [],
-        timestamp: newEvent.timestamp,
-        round: currentRound,
-      },
-      ...prev,
-    ]);
-    setActiveEvent({ text, impact, source: "user" });
-  }, [currentRound]);
+  const handleStart = useCallback(
+    (setupAgents: Agent[], setupAssets: Asset[]) => {
+      // Optimistically show the game using mock init so the UI is responsive,
+      // then try to replace it with real backend state.
+      const mockInit = () => {
+        setAgents(setupAgents);
+        setMarketData({
+          assets: setupAssets,
+          fearGreedIndex: 50,
+          rumorSpeed: 0,
+          panicSellRatio: 0,
+          fomoBuyRatio: 0,
+          whaleBuyIntensity: 0,
+          whaleSellIntensity: 0,
+          sentimentContribution: setupAgents.map((a) => ({ agent: a.alias, value: 0 })),
+        });
+        setEvents([]);
+        setPosts([]);
+        setCurrentRound(1);
+        setConnection("mock");
+      };
+
+      mockInit();
+      setRoundReport(null);
+      setOverallMarkdown(null);
+      setGameStarted(true);
+
+      startGame(setupAgents.length, 42)
+        .then((state) => {
+          applyGameState(state);
+          setConnection("backend");
+        })
+        .catch((err) => {
+          // Backend offline: keep mock initialization so the demo still works.
+          console.warn("[MarketAquarium] startGame failed, using mock:", err);
+          setConnection("mock");
+        });
+    },
+    [applyGameState]
+  );
+
+  const handleEvent = useCallback(
+    (text: string) => {
+      // Local mock behavior, used directly when offline and as an instant
+      // fallback if the backend call fails.
+      const mockEvent = () => {
+        const impact: "positive" | "negative" | "neutral" =
+          Math.random() > 0.5 ? "negative" : "positive";
+        const timestamp = new Date().toLocaleTimeString("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const newEvent: GameEvent = {
+          id: `e${Date.now()}`,
+          round: currentRound,
+          text,
+          source: "user",
+          impact,
+          timestamp,
+        };
+        setEvents((prev) => [newEvent, ...prev]);
+        setPosts((prev) => [
+          {
+            id: `p${Date.now()}`,
+            agentId: "system",
+            agentAlias: "시스템",
+            content: `[속보] ${text}`,
+            likes: 0,
+            comments: [],
+            timestamp,
+            round: currentRound,
+          },
+          ...prev,
+        ]);
+        setActiveEvent({ text, impact, source: "user" });
+      };
+
+      if (connection !== "backend") {
+        mockEvent();
+        return;
+      }
+
+      submitEvent({ text, is_rumor: false })
+        .then((res) => {
+          applyGameState(res);
+          setRoundReport(res.round_report);
+          // Drive the event overlay from the freshly returned event's impact.
+          const justFired =
+            res.events.find((e) => e.text === text) ?? res.events[0];
+          setActiveEvent({
+            text,
+            impact: justFired?.impact ?? "neutral",
+            source: "user",
+          });
+        })
+        .catch((err) => {
+          console.warn("[MarketAquarium] submitEvent failed, using mock:", err);
+          mockEvent();
+        });
+    },
+    [connection, currentRound, applyGameState]
+  );
+
+  const handleToggleReport = useCallback(() => {
+    const next = !reportOpen;
+    setReportOpen(next);
+    if (next && connection === "backend") {
+      // Prefer the backend overall report when opening.
+      getReport()
+        .then((report) => setOverallMarkdown(report.markdown))
+        .catch((err) => {
+          console.warn("[MarketAquarium] getReport failed, using fallback:", err);
+          setOverallMarkdown(null);
+        });
+    }
+  }, [reportOpen, connection]);
 
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} />;
   }
 
-  const currentReport = rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
+  // Choose report content: backend overall report > latest round report > mock.
+  const mockReport =
+    rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
+  const reportForView = {
+    round: roundReport?.round ?? currentRound,
+    markdown: overallMarkdown ?? roundReport?.markdown ?? mockReport.markdown,
+  };
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-surface-primary">
@@ -102,7 +201,7 @@ export default function Home() {
         boardOpen={boardOpen}
         onToggleMarket={() => setMarketOpen(!marketOpen)}
         onToggleBoard={() => setBoardOpen(!boardOpen)}
-        onToggleReport={() => setReportOpen(!reportOpen)}
+        onToggleReport={handleToggleReport}
         reportOpen={reportOpen}
         marketNotifications={events.length}
         boardNotifications={posts.length}
@@ -130,10 +229,7 @@ export default function Home() {
 
       {/* Round report - center modal */}
       {reportOpen && (
-        <RoundReport
-          report={currentReport}
-          onClose={() => setReportOpen(false)}
-        />
+        <RoundReport report={reportForView} onClose={() => setReportOpen(false)} />
       )}
 
       {selectedAgent && (

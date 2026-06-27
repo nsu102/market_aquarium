@@ -54,15 +54,22 @@ def run_gpt_prompt_wake_up_hour(persona, test_input=None, verbose=False):
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
-    cr = int(gpt_response.strip().lower().split("am")[0])
+    # Grab the first integer anywhere in the response so phrasings like
+    # "8", "8:00 am", or "Isabella wakes up at 7 am" all work.
+    m = re.search(r"\d{1,2}", gpt_response)
+    if not m:
+      raise ValueError("no hour found")
+    cr = int(m.group())
+    if cr < 0 or cr > 23:
+      raise ValueError("hour out of range")
     return cr
-  
-  def __func_validate(gpt_response, prompt=""): 
+
+  def __func_validate(gpt_response, prompt=""):
     try: __func_clean_up(gpt_response, prompt="")
     except: return False
     return True
 
-  def get_fail_safe(): 
+  def get_fail_safe():
     fs = 8
     return fs
 
@@ -111,20 +118,28 @@ def run_gpt_prompt_daily_plan(persona,
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
+    text = gpt_response.strip()
     cr = []
-    _cr = gpt_response.split(")")
-    for i in _cr: 
-      if i[-1].isdigit(): 
-        i = i[:-1].strip()
-        if i[-1] == "." or i[-1] == ",": 
-          cr += [i[:-1].strip()]
+    # Preferred: one list item per line ("1) ...", "1. ...", "- ...", "* ...").
+    for line in text.split("\n"):
+      line = line.strip()
+      m = re.match(r"^(?:\d+[\).]|[-*•])\s*(.+)$", line)
+      if m:
+        item = m.group(1).replace("**", "").replace("*", "").strip()
+        item = item.rstrip(".,;")
+        if item:
+          cr += [item]
+    # Fallback: an inline "1) a 2) b 3) c" string.
+    if not cr:
+      parts = re.split(r"\d+\)\s*", text)
+      cr = [p.strip().rstrip(".,;") for p in parts if p.strip()]
     return cr
 
   def __func_validate(gpt_response, prompt=""):
-    try: __func_clean_up(gpt_response, prompt="")
-    except: 
+    try:
+      return len(__func_clean_up(gpt_response, prompt)) > 0
+    except:
       return False
-    return True
 
   def get_fail_safe(): 
     fs = ['wake up and complete the morning routine at 6:00 am', 
@@ -357,70 +372,102 @@ def run_gpt_prompt_task_decomp(persona,
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
-    print ("TOODOOOOOO")
-    print (gpt_response)
-    print ("-==- -==- -==- ")
+    # Robust parser. Tolerates the legacy completion format
+    #   "2) Isabella is brushing her teeth. (duration in minutes: 15, minutes left: 165)"
+    # as well as the markdown / time-range styles modern chat models emit:
+    #   "- **08:00-08:05**: Isabella wakes up and gets out of bed."
+    #   "1. Isabella reviews her schedule (15 min)"
+    def _parse_duration(line):
+      # 1) legacy explicit "(duration in minutes: D"
+      m = re.search(r"duration in minutes:\s*(\d+)", line, re.IGNORECASE)
+      if m:
+        return int(m.group(1))
+      # 2) time range like 08:00-08:05 / 08:00 ~ 08:05 / 08:00–08:05
+      m = re.search(r"(\d{1,2}):(\d{2})\s*(?:am|pm)?\s*[-–~]+\s*"
+                    r"(\d{1,2}):(\d{2})", line, re.IGNORECASE)
+      if m:
+        sh, sm, eh, em = (int(x) for x in m.groups())
+        d = (eh * 60 + em) - (sh * 60 + sm)
+        if d < 0:
+          d += 24 * 60
+        return d
+      # 3) explicit "(D min)" / "D minutes"
+      m = re.search(r"(\d+)\s*min", line, re.IGNORECASE)
+      if m:
+        return int(m.group(1))
+      return None
 
-    # TODO SOMETHING HERE sometimes fails... See screenshot
-    temp = [i.strip() for i in gpt_response.split("\n")]
-    _cr = []
+    def _clean_task(line):
+      # strip leading list markers: "1)", "2.", "-", "*", "•"
+      t = re.sub(r"^\s*(?:\d+[\).]|[-*•])\s*", "", line)
+      # strip a leading time-range label: "**08:00-08:05**:" / "08:00 ~ 08:05:"
+      t = re.sub(r"^\**\s*\d{1,2}:\d{2}\s*(?:am|pm)?\s*[-–~]+\s*"
+                 r"\d{1,2}:\d{2}\s*(?:am|pm)?\s*\**\s*:?\s*", "", t,
+                 flags=re.IGNORECASE)
+      # drop markdown emphasis markers
+      t = t.replace("**", "").replace("*", "").replace("`", "")
+      # drop a trailing "(duration in minutes: ...)" / "(15 min)" annotation
+      t = re.sub(r"\([^()]*(?:duration in minutes|\bmin)[^()]*\)\s*$", "", t,
+                 flags=re.IGNORECASE)
+      t = t.strip()
+      if t.endswith("."):
+        t = t[:-1]
+      return t.strip()
+
+    lines = [i.strip() for i in gpt_response.split("\n") if i.strip()]
     cr = []
-    for count, i in enumerate(temp): 
-      if count != 0: 
-        _cr += [" ".join([j.strip () for j in i.split(" ")][3:])]
-      else: 
-        _cr += [i]
-    for count, i in enumerate(_cr): 
-      k = [j.strip() for j in i.split("(duration in minutes:")]
-      task = k[0]
-      if task[-1] == ".": 
-        task = task[:-1]
-      duration = int(k[1].split(",")[0].strip())
-      cr += [[task, duration]]
+    for line in lines:
+      task = _clean_task(line)
+      if not task:
+        continue
+      d = _parse_duration(line)
+      cr += [[task, d if d is not None else 5]]
 
-    total_expected_min = int(prompt.split("(total duration in minutes")[-1]
-                                   .split("):")[0].strip())
-    
-    # TODO -- now, you need to make sure that this is the same as the sum of 
-    #         the current action sequence. 
-    curr_min_slot = [["dummy", -1],] # (task_name, task_index)
-    for count, i in enumerate(cr): 
-      i_task = i[0] 
-      i_duration = i[1]
+    # total expected minutes: parse from the prompt, fall back to the duration
+    # passed into this function.
+    try:
+      total_expected_min = int(prompt.split("(total duration in minutes")[-1]
+                                     .split("):")[0].strip())
+    except (ValueError, IndexError):
+      total_expected_min = duration
+    if not total_expected_min or total_expected_min <= 0:
+      total_expected_min = sum(d for _, d in cr) or duration or 5
 
+    # Nothing usable parsed -> one block covering the whole window.
+    if not cr:
+      cr = [["idle", total_expected_min]]
+
+    # Snap each subtask onto 5-minute slots (as the original did).
+    curr_min_slot = []  # list of (task_name, task_index)
+    for count, (i_task, i_duration) in enumerate(cr):
       i_duration -= (i_duration % 5)
-      if i_duration > 0: 
-        for j in range(i_duration): 
-          curr_min_slot += [(i_task, count)]       
-    curr_min_slot = curr_min_slot[1:]   
+      for _ in range(i_duration):
+        curr_min_slot += [(i_task, count)]
 
-    if len(curr_min_slot) > total_expected_min: 
-      last_task = curr_min_slot[60]
-      for i in range(1, 6): 
-        curr_min_slot[-1 * i] = last_task
-    elif len(curr_min_slot) < total_expected_min: 
+    # Pad / trim so the slots sum to exactly total_expected_min.
+    if not curr_min_slot:
+      curr_min_slot = [(cr[0][0], 0)] * total_expected_min
+    if len(curr_min_slot) > total_expected_min:
+      curr_min_slot = curr_min_slot[:total_expected_min]
+    elif len(curr_min_slot) < total_expected_min:
       last_task = curr_min_slot[-1]
-      for i in range(total_expected_min - len(curr_min_slot)):
-        curr_min_slot += [last_task]
+      curr_min_slot += [last_task] * (total_expected_min - len(curr_min_slot))
 
     cr_ret = [["dummy", -1],]
-    for task, task_index in curr_min_slot: 
-      if task != cr_ret[-1][0]: 
+    for task, task_index in curr_min_slot:
+      if task != cr_ret[-1][0]:
         cr_ret += [[task, 1]]
-      else: 
+      else:
         cr_ret[-1][1] += 1
     cr = cr_ret[1:]
 
     return cr
 
-  def __func_validate(gpt_response, prompt=""): 
-    # TODO -- this sometimes generates error 
-    try: 
-      __func_clean_up(gpt_response)
-    except: 
-      pass
-      # return False
-    return gpt_response
+  def __func_validate(gpt_response, prompt=""):
+    try:
+      return len(__func_clean_up(gpt_response, prompt)) > 0
+    except Exception:
+      return False
 
   def get_fail_safe(): 
     fs = ["asleep"]
@@ -457,21 +504,26 @@ def run_gpt_prompt_task_decomp(persona,
 
   fin_output = []
   time_sum = 0
-  for i_task, i_duration in output: 
+  for i_task, i_duration in output:
     time_sum += i_duration
     # HM?????????
-    # if time_sum < duration: 
-    if time_sum <= duration: 
+    # if time_sum < duration:
+    if time_sum <= duration:
       fin_output += [[i_task, i_duration]]
-    else: 
+    else:
       break
+  # Guard: if nothing fit within the window (e.g. first block already exceeds
+  # the duration), keep at least the first subtask so we never index an empty
+  # list below.
+  if not fin_output:
+    fin_output = [list(output[0])] if output else [["idle", duration]]
   ftime_sum = 0
-  for fi_task, fi_duration in fin_output: 
+  for fi_task, fi_duration in fin_output:
     ftime_sum += fi_duration
-  
+
   # print ("for debugging... line 365", fin_output)
   fin_output[-1][1] += (duration - ftime_sum)
-  output = fin_output 
+  output = fin_output
 
 
 
@@ -553,19 +605,19 @@ def run_gpt_prompt_action_sector(action_description,
 
 
   def __func_clean_up(gpt_response, prompt=""):
-    cleaned_response = gpt_response.split("}")[0]
-    return cleaned_response
+    # Pull the area name out of completions like "{Johnson Park}", "Johnson Park",
+    # or "Answer: {Johnson Park}". The caller still matches this against the
+    # list of accessible sectors, so we only need the bare name here.
+    cr = gpt_response.split("}")[0]
+    if "{" in cr:
+      cr = cr.split("{")[-1]
+    cr = cr.split("\n")[0].replace("Answer:", "").strip().strip('".').strip()
+    return cr
 
-  def __func_validate(gpt_response, prompt=""): 
-    if len(gpt_response.strip()) < 1: 
-      return False
-    if "}" not in gpt_response:
-      return False
-    if "," in gpt_response: 
-      return False
-    return True
-  
-  def get_fail_safe(): 
+  def __func_validate(gpt_response, prompt=""):
+    return len(gpt_response.strip()) >= 1
+
+  def get_fail_safe():
     fs = ("kitchen")
     return fs
 
@@ -576,11 +628,11 @@ def run_gpt_prompt_action_sector(action_description,
   #   return cr
 
   # def __chat_func_validate(gpt_response, prompt=""): ############
-  #   try: 
+  #   try:
   #     gpt_response = __func_clean_up(gpt_response, prompt="")
-  #   except: 
+  #   except:
   #     return False
-  #   return True 
+  #   return True
 
   # print ("asdhfapsh8p9hfaiafdsi;ldfj as DEBUG 20") ########
   # gpt_param = {"engine": "text-davinci-002", "max_tokens": 15, 
@@ -683,23 +735,21 @@ def run_gpt_prompt_action_arena(action_description,
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
-    cleaned_response = gpt_response.split("}")[0]
-    return cleaned_response
+    # Pull the arena name out of "{kitchen}", "kitchen", or "Answer: {kitchen}".
+    cr = gpt_response.split("}")[0]
+    if "{" in cr:
+      cr = cr.split("{")[-1]
+    cr = cr.split("\n")[0].replace("Answer:", "").strip().strip('".').strip()
+    return cr
 
-  def __func_validate(gpt_response, prompt=""): 
-    if len(gpt_response.strip()) < 1: 
-      return False
-    if "}" not in gpt_response:
-      return False
-    if "," in gpt_response: 
-      return False
-    return True
-  
-  def get_fail_safe(): 
+  def __func_validate(gpt_response, prompt=""):
+    return len(gpt_response.strip()) >= 1
+
+  def get_fail_safe():
     fs = ("kitchen")
     return fs
 
-  gpt_param = {"engine": "text-davinci-003", "max_tokens": 15, 
+  gpt_param = {"engine": "text-davinci-003", "max_tokens": 15,
                "temperature": 0, "top_p": 1, "stream": False,
                "frequency_penalty": 0, "presence_penalty": 0, "stop": None}
   prompt_template = "persona/prompt_template/v1/action_location_object_vMar11.txt"
@@ -710,10 +760,17 @@ def run_gpt_prompt_action_arena(action_description,
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
   print (output)
-  # y = f"{act_world}:{act_sector}"
-  # x = [i.strip() for i in persona.s_mem.get_str_accessible_sector_arenas(y).split(",")]
-  # if output not in x: 
-  #   output = random.choice(x)
+  # Make sure the chosen arena actually exists in this sector; otherwise the
+  # downstream spatial-memory lookup raises a KeyError. Match case-insensitively
+  # and fall back to a valid accessible arena.
+  y = f"{act_world}:{act_sector}"
+  x = [i.strip() for i in
+       persona.s_mem.get_str_accessible_sector_arenas(y).split(",") if i.strip()]
+  if x and output not in x:
+    match = [i for i in x if output.lower() == i.lower()]
+    if not match:
+      match = [i for i in x if output.lower() in i.lower() or i.lower() in output.lower()]
+    output = match[0] if match else x[0]
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 

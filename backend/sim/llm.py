@@ -1,0 +1,210 @@
+"""LLM client wrapper for the simulation.
+
+Design goals:
+- Mockable: every FR module takes an ``LLMClient`` argument; tests inject a
+  ``FakeLLM`` so the whole round is deterministic with the LLM mocked
+  (PRD §2.3 / test_round_reproducible_with_mocked_llm).
+- Robust: ``safe_json`` never raises — on any failure the caller's fallback is
+  returned and the loop continues (PRD §2.4 fallback assertion).
+- Secure: the API key comes from the OPENROUTER_API_KEY env var, never
+  hardcoded. (The legacy hardcoded key in the reverie fork must be rotated.)
+
+Chat routes through OpenRouter (model from OPENROUTER_MODEL, default a Claude
+model per the locked decision). Embeddings are intentionally out of scope here.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any, Callable
+
+DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-haiku")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+class LLMError(RuntimeError):
+    pass
+
+
+class LLMClient:
+    """Thin OpenRouter chat client. Lazy-imports httpx so tests need no network."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = 30.0,
+    ):
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
+        self.model = model or DEFAULT_MODEL
+        self.timeout = timeout
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def chat(self, user: str, system: str | None = None, temperature: float = 0.7) -> str:
+        if not self.available:
+            raise LLMError("OPENROUTER_API_KEY not set")
+        import httpx  # lazy import
+
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user})
+        try:
+            resp = httpx.post(
+                OPENROUTER_URL,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={"model": self.model, "messages": messages, "temperature": temperature},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except Exception as exc:  # noqa: BLE001 - any failure -> LLMError -> fallback
+            raise LLMError(str(exc)) from exc
+
+
+class FakeLLM(LLMClient):
+    """Deterministic test/offline double.
+
+    Pass either a ``response`` string, a list of responses (consumed in order),
+    or a ``handler`` callable(user, system) -> str for context-aware replies.
+    """
+
+    def __init__(
+        self,
+        response: str | list[str] | None = None,
+        handler: Callable[[str, str | None], str] | None = None,
+    ):
+        super().__init__(api_key="fake", model="fake")
+        self._response = response
+        self._handler = handler
+        self._queue = list(response) if isinstance(response, list) else None
+        self.calls: list[tuple[str, str | None]] = []
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    def chat(self, user: str, system: str | None = None, temperature: float = 0.7) -> str:
+        self.calls.append((user, system))
+        if self._handler is not None:
+            return self._handler(user, system)
+        if self._queue is not None:
+            return self._queue.pop(0) if self._queue else "{}"
+        if isinstance(self._response, str):
+            return self._response
+        return "{}"
+
+
+def extract_json(text: str) -> dict[str, Any]:
+    """Best-effort: pull the first JSON object out of an LLM response."""
+    text = text.strip()
+    # strip ```json fences
+    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"no JSON object in response: {text[:120]!r}")
+
+
+def safe_json(
+    client: LLMClient,
+    user: str,
+    fallback: dict[str, Any],
+    system: str | None = None,
+    temperature: float = 0.7,
+) -> dict[str, Any]:
+    """Call the LLM and parse JSON, returning ``fallback`` on any failure.
+
+    Guarantees the simulation loop never crashes on an LLM hiccup (PRD §2.4).
+    """
+    try:
+        raw = client.chat(user, system=system, temperature=temperature)
+        return extract_json(raw)
+    except Exception:  # noqa: BLE001
+        return dict(fallback)
+
+
+# Module-level default client (constructed lazily so import never needs a key).
+_default: LLMClient | None = None
+
+
+def default_client() -> LLMClient:
+    global _default
+    if _default is None:
+        _default = LLMClient()
+    return _default
+
+
+# --------------------------------------------------------------------------- #
+# Scripted offline client — gives a lively, deterministic demo with no API key.
+# It mirrors the LLM JSON contracts so the FR modules behave identically; the
+# content is template-flavoured by reading persona/impact keywords in the prompt.
+# --------------------------------------------------------------------------- #
+_NEG_WORDS = ["해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산", "negative", "hack", "crash"]
+_POS_WORDS = ["승인", "상승", "호재", "급등", "유입", "인하", "positive", "approval", "surge", "rally"]
+
+
+def _is_negative(text: str) -> bool:
+    low = text.lower()
+    return any(w in text or w in low for w in _NEG_WORDS) and not any(
+        w in text or w in low for w in _POS_WORDS
+    )
+
+
+def _agent_type_in_prompt(text: str) -> str:
+    """The FR-module persona block renders 'type: <agent_type>'; the first such
+    token identifies the current agent unambiguously (feed text has no 'type:')."""
+    m = re.search(r"type:\s*([a-z_]+)", text)
+    return m.group(1) if m else ""
+
+
+def _persona_post(text: str) -> str:
+    neg = _is_negative(text)
+    t = _agent_type_in_prompt(text)
+    if t == "panic_seller":
+        return "이거 진짜 위험한 거 아니에요? 일단 정리해야 하나..." if neg else "오른다는데 지금 들어가도 되나요?"
+    if t in ("fomo_trader", "conspiracy"):
+        return "눌림목인가? 줍줍 타이밍?" if neg else "지금 안 사면 후회한다. 가즈아"
+    if t == "value_investor":
+        return "근거가 약합니다. 펀더멘탈은 그대로예요." if neg else "과열입니다. 차분히 보죠."
+    if t == "whale":
+        return "대중이 공포일 때가 매집 기회죠." if neg else "유동성 흐름을 봅니다."
+    if t == "contrarian":
+        return "다들 파니까 저는 삽니다." if neg else "다들 탐욕이면 저는 덜어냅니다."
+    if t == "quant":
+        return "변동성 확대. 패닉셀 비율이 비정상적으로 높습니다." if neg else "신호는 중립. 추세 확인 중."
+    if t == "news_bot":
+        return "요약: 변동성 확대 구간. 추이 관찰 필요."
+    return "시장 분위기가 심상치 않네요." if neg else "분위기 나쁘지 않은데요."
+
+
+def scripted_client() -> "FakeLLM":
+    def handler(user: str, system: str | None) -> str:
+        if "fear_delta" in user:
+            if _is_negative(user):
+                return json.dumps({"fear_delta": 9, "greed_delta": -4})
+            return json.dumps({"fear_delta": -4, "greed_delta": 8})
+        if "kind" in user:
+            return json.dumps(
+                {"kind": "POST", "text": _persona_post(user), "symbol_tags": ["BTC"]}
+            )
+        if "score" in user:
+            low = user.lower()
+            rumor = "rumor" in low or "루머" in user
+            skeptical = "skeptical" in low or "analytical" in low
+            return json.dumps({"score": 3 if (rumor and skeptical) else 6})
+        return "{}"
+
+    return FakeLLM(handler=handler)
