@@ -14,14 +14,6 @@ body {
 ::-webkit-scrollbar-thumb { background: #D4C9B5; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #BFB49E; }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
-@keyframes bubble-pop {
-  0% { opacity: 0; transform: scale(0.9) translateY(4px); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
-}
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
@@ -31,28 +23,103 @@ body {
   100% { opacity: 1; transform: translateY(0); }
 }
 
-.animate-float { animation: float 3s ease-in-out infinite; }
-.animate-bubble { animation: bubble-pop 0.3s ease-out; }
 .animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
 .animate-slide-up { animation: slide-up 0.25s ease-out; }
 
-/* Setup screen background */
-.setup-bg {
-  background:
-    radial-gradient(ellipse at 20% 50%, rgba(42, 35, 24, 0.4) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 30%, rgba(60, 48, 28, 0.3) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 80%, rgba(30, 26, 18, 0.5) 0%, transparent 60%),
-    linear-gradient(160deg, #1a1612 0%, #201c14 30%, #16130f 60%, #1e1a14 100%);
+/* Report markdown styles */
+.report-markdown h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #3D3529;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #D4C9B5;
 }
-.setup-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(200, 168, 78, 0.015) 2px, rgba(200, 168, 78, 0.015) 4px),
-    repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(200, 168, 78, 0.015) 2px, rgba(200, 168, 78, 0.015) 4px);
-  pointer-events: none;
+.report-markdown h2 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #3D3529;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
 }
-
-.setup-bg .setup-scrollbar::-webkit-scrollbar-track { background: #15120f; }
-.setup-bg .setup-scrollbar::-webkit-scrollbar-thumb { background: #3d3428; }
+.report-markdown h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #5a5040;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+}
+.report-markdown p {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: #5a5040;
+  margin-bottom: 0.5rem;
+}
+.report-markdown hr {
+  border: none;
+  border-top: 1px solid #E8E0D0;
+  margin: 1rem 0;
+}
+.report-markdown ul,
+.report-markdown ol {
+  font-size: 0.8rem;
+  color: #5a5040;
+  padding-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.report-markdown li {
+  margin-bottom: 0.2rem;
+  line-height: 1.6;
+}
+.report-markdown strong {
+  color: #3D3529;
+  font-weight: 600;
+}
+.report-markdown em {
+  color: #8a7d6b;
+  font-style: italic;
+}
+.report-markdown blockquote {
+  border-left: 3px solid #D4A843;
+  padding: 0.4rem 0.75rem;
+  margin: 0.5rem 0;
+  background: #F5F0E5;
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+.report-markdown blockquote p {
+  color: #6B5E48;
+  font-size: 0.8rem;
+  margin: 0;
+}
+.report-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  margin: 0.5rem 0;
+}
+.report-markdown thead th {
+  text-align: left;
+  font-weight: 600;
+  color: #3D3529;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 2px solid #D4C9B5;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.report-markdown tbody td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid #E8E0D0;
+  color: #5a5040;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.report-markdown tbody tr:hover {
+  background: #F5F0E5;
+}
+.report-markdown code {
+  font-size: 0.75rem;
+  background: #F0EBE0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  color: #6B5E48;
+}

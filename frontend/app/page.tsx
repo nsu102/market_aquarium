@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import MarketPanel from "@/components/MarketPanel";
-import AquariumMap from "@/components/AquariumMap";
+import AquariumMap, { AquariumMapHandle } from "@/components/AquariumMap";
 import BoardFeed from "@/components/BoardFeed";
 import RoundReport from "@/components/RoundReport";
 import AgentDetail from "@/components/AgentDetail";
@@ -13,7 +13,7 @@ import { Agent } from "@/mock_data/agents";
 import { Asset, MarketData } from "@/mock_data/market";
 import { posts as initialPosts } from "@/mock_data/posts";
 import { rounds } from "@/mock_data/rounds";
-import { events as initialEvents, GameEvent } from "@/mock_data/events";
+import { GameEvent } from "@/mock_data/events";
 
 interface ActiveEvent {
   text: string;
@@ -24,15 +24,16 @@ interface ActiveEvent {
 export default function Home() {
   const [gameStarted, setGameStarted] = useState(false);
   const [currentRound, setCurrentRound] = useState(1);
-  const [playing, setPlaying] = useState(false);
   const [marketOpen, setMarketOpen] = useState(true);
   const [boardOpen, setBoardOpen] = useState(true);
+  const [reportOpen, setReportOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [posts, setPosts] = useState(initialPosts);
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
+  const mapRef = useRef<AquariumMapHandle>(null);
 
   const handleStart = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
     setAgents(setupAgents);
@@ -80,10 +81,6 @@ export default function Home() {
     setActiveEvent({ text, impact, source: "user" });
   }, [currentRound]);
 
-  const nextRound = useCallback(() => {
-    setCurrentRound((r) => r + 1);
-  }, []);
-
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} />;
   }
@@ -94,28 +91,29 @@ export default function Home() {
     <div className="h-screen w-screen relative overflow-hidden bg-surface-primary">
       {/* Full-screen game map */}
       <div className="absolute inset-0">
-        <AquariumMap agents={agents} onSelectAgent={setSelectedAgent} />
+        <AquariumMap ref={mapRef} agents={agents} onSelectAgent={setSelectedAgent} />
       </div>
 
       {/* HUD overlay */}
       <GameHUD
         round={currentRound}
-        playing={playing}
-        onTogglePlay={() => setPlaying(!playing)}
-        onNextRound={nextRound}
         onEvent={handleEvent}
         marketOpen={marketOpen}
         boardOpen={boardOpen}
         onToggleMarket={() => setMarketOpen(!marketOpen)}
         onToggleBoard={() => setBoardOpen(!boardOpen)}
+        onToggleReport={() => setReportOpen(!reportOpen)}
+        reportOpen={reportOpen}
         marketNotifications={events.length}
         boardNotifications={posts.length}
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onZoomOut={() => mapRef.current?.zoomOut()}
       />
 
-      {/* Market panel - floating left */}
+      {/* Market panel - floating left, content-fit */}
       {marketOpen && marketData && (
-        <div className="absolute left-4 top-16 bottom-14 w-[300px] z-20">
-          <div className="h-full bg-surface-card/95 backdrop-blur-md border border-border-light rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden flex flex-col">
+        <div className="absolute left-4 top-16 w-[300px] z-20 max-h-[calc(100vh-7rem)]">
+          <div className="bg-surface-card border border-border-light rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]">
             <MarketPanel data={marketData} />
           </div>
         </div>
@@ -123,17 +121,20 @@ export default function Home() {
 
       {/* Board feed - floating right */}
       {boardOpen && (
-        <div className="absolute right-4 top-16 bottom-14 w-[370px] z-20">
+        <div className="absolute right-4 top-16 bottom-16 w-[370px] z-20">
           <div className="h-full rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
             <BoardFeed posts={posts} />
           </div>
         </div>
       )}
 
-      {/* Round report - floating bottom */}
-      <div className="absolute bottom-0 left-0 right-0 z-10">
-        <RoundReport report={currentReport} events={events.filter((e) => e.round === currentRound)} />
-      </div>
+      {/* Round report - center modal */}
+      {reportOpen && (
+        <RoundReport
+          report={currentReport}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
 
       {selectedAgent && (
         <AgentDetail agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
