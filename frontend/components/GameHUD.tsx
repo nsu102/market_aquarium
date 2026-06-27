@@ -5,9 +5,6 @@ import {
   Fish,
   BarChart3,
   MessageSquare,
-  Play,
-  Pause,
-  SkipForward,
   Send,
   Zap,
   X,
@@ -18,9 +15,6 @@ import {
 
 interface Props {
   round: number;
-  playing: boolean;
-  onTogglePlay: () => void;
-  onNextRound: () => void;
   onEvent: (text: string) => void;
   marketOpen: boolean;
   boardOpen: boolean;
@@ -32,8 +26,6 @@ interface Props {
   boardNotifications: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  speed: number;
-  onSpeedChange: (speed: number) => void;
 }
 
 function Badge({ count }: { count: number }) {
@@ -48,9 +40,6 @@ function Badge({ count }: { count: number }) {
 
 export default function GameHUD({
   round,
-  playing,
-  onTogglePlay,
-  onNextRound,
   onEvent,
   marketOpen,
   boardOpen,
@@ -62,8 +51,6 @@ export default function GameHUD({
   boardNotifications,
   onZoomIn,
   onZoomOut,
-  speed,
-  onSpeedChange,
 }: Props) {
   const [eventOpen, setEventOpen] = useState(false);
   const [eventText, setEventText] = useState("");
@@ -120,45 +107,10 @@ export default function GameHUD({
 
           <div className="w-px h-7 bg-border-light mx-1" />
 
-          {/* Round controls */}
+          {/* Round display */}
           <div className="flex items-center gap-1 px-1">
-            <span className="text-[10px] text-text-tertiary font-medium mr-0.5">R</span>
+            <span className="text-[10px] text-text-tertiary font-medium">R</span>
             <span className="text-accent-green font-mono font-bold text-sm min-w-[16px] text-center">{round}</span>
-            <button
-              onClick={onTogglePlay}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
-                playing
-                  ? "bg-accent-red/10 text-accent-red hover:bg-accent-red/20"
-                  : "bg-accent-green/10 text-accent-green hover:bg-accent-green/20"
-              }`}
-            >
-              {playing ? <Pause size={14} /> : <Play size={14} />}
-            </button>
-            <button
-              onClick={onNextRound}
-              className="w-8 h-8 rounded-lg bg-surface-tertiary/60 text-text-secondary flex items-center justify-center hover:bg-accent-blue/10 hover:text-accent-blue transition cursor-pointer"
-            >
-              <SkipForward size={14} />
-            </button>
-          </div>
-
-          <div className="w-px h-7 bg-border-light mx-1" />
-
-          {/* Speed */}
-          <div className="flex items-center gap-0.5">
-            {[1, 2, 4].map((s) => (
-              <button
-                key={s}
-                onClick={() => onSpeedChange(s)}
-                className={`h-7 px-1.5 rounded-md text-[10px] font-bold transition cursor-pointer ${
-                  speed === s
-                    ? "bg-accent-green/15 text-accent-green"
-                    : "text-text-tertiary hover:text-text-secondary hover:bg-surface-secondary"
-                }`}
-              >
-                {s}x
-              </button>
-            ))}
           </div>
 
           <div className="w-px h-7 bg-border-light mx-1" />

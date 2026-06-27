@@ -116,14 +116,26 @@ export default function SetupScreen({ onStart }: Props) {
     if (available.length === 0) return;
     const char = available[0];
     const idx = agents.length;
+    // ponytail: 기존 alias에서 최대 번호 추출해서 중복 방지
+    const maxNum = agents.reduce((max, a) => {
+      const m = a.alias.match(/^투자자\s*(\d+)$/);
+      return m ? Math.max(max, Number(m[1])) : max;
+    }, 0);
+    const randomPortfolio = DEFAULT_ASSETS
+      .filter(() => Math.random() > 0.5)
+      .map((ea) => ({
+        asset: ea.symbol,
+        amount: +(Math.random() * (ea.price > 1e6 ? 1 : 100)).toFixed(ea.price > 1e6 ? 4 : 2),
+        avgPrice: Math.round(ea.price * (0.8 + Math.random() * 0.4)),
+      }));
     const newAgent: SetupAgent = {
       id: `custom_${Date.now()}`,
-      alias: `에이전트 ${idx + 1}`,
+      alias: `투자자 ${maxNum + 1}`,
       type: "custom",
-      cash: 10000000,
-      portfolio: [],
-      fear: 50,
-      greed: 50,
+      cash: Math.round(5000000 + Math.random() * 45000000),
+      portfolio: randomPortfolio,
+      fear: Math.round(20 + Math.random() * 60),
+      greed: Math.round(20 + Math.random() * 60),
       color: CUSTOM_COLORS[idx % CUSTOM_COLORS.length],
       enabled: true,
       sprite: `/assets/characters/${char.name}.png`,
@@ -149,7 +161,7 @@ export default function SetupScreen({ onStart }: Props) {
 
   const handleStart = () => {
     const finalAgents: Agent[] = enabledAgents.map((a) => ({
-      id: a.id, alias: a.alias, type: a.type, cash: Math.round(a.cash), portfolio: a.portfolio,
+      id: a.id, alias: a.alias, type: a.type, sprite: a.sprite, cash: Math.round(a.cash), portfolio: a.portfolio,
       fear: a.fear, greed: a.greed, lastAction: "대기", location: "home" as const,
       position: { x: 20 + Math.random() * 60, y: 20 + Math.random() * 60 }, bubble: "", color: a.color,
     }));
@@ -169,12 +181,12 @@ export default function SetupScreen({ onStart }: Props) {
   }, [selected]);
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center overflow-hidden select-none relative">
+    <div className="h-screen w-screen flex items-center justify-center overflow-hidden select-none relative bg-[#1a1612]">
       {/* Background */}
-      <Image src="/assets/bg.png" alt="" fill className="object-cover" style={{ imageRendering: "pixelated" }} priority />
-      <div className="absolute inset-0 bg-black/50" />
+      <Image src="/assets/bg.png" alt="" fill className="object-cover opacity-40" style={{ imageRendering: "pixelated" }} priority />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#1a1612]/60 via-[#1a1612]/30 to-[#1a1612]/70" />
       {/* ═══ Modal ═══ */}
-      <div className="relative z-10 flex flex-col w-[860px] h-[560px] max-w-[92vw] max-h-[88vh] rounded-lg overflow-hidden shadow-[0_8px_60px_rgba(0,0,0,0.7)] border border-[#3d3428]/50">
+      <div className="relative z-10 flex flex-col w-[860px] h-[560px] max-w-[92vw] max-h-[88vh] mx-auto rounded-lg overflow-hidden shadow-[0_8px_60px_rgba(0,0,0,0.7)] border border-[#3d3428]/50">
 
         {/* Title bar */}
         <div className="h-10 bg-[#13100d] border-b border-[#3d3428]/50 flex items-center px-4 gap-3 flex-shrink-0">

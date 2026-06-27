@@ -2,6 +2,7 @@ export interface Agent {
   id: string;
   alias: string;
   type: string;
+  sprite: string;
   cash: number;
   portfolio: { asset: string; amount: number; avgPrice: number }[];
   fear: number;

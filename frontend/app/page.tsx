@@ -13,7 +13,7 @@ import { Agent } from "@/mock_data/agents";
 import { Asset, MarketData } from "@/mock_data/market";
 import { posts as initialPosts } from "@/mock_data/posts";
 import { rounds } from "@/mock_data/rounds";
-import { events as initialEvents, GameEvent } from "@/mock_data/events";
+import { GameEvent } from "@/mock_data/events";
 
 interface ActiveEvent {
   text: string;
@@ -24,7 +24,6 @@ interface ActiveEvent {
 export default function Home() {
   const [gameStarted, setGameStarted] = useState(false);
   const [currentRound, setCurrentRound] = useState(1);
-  const [playing, setPlaying] = useState(false);
   const [marketOpen, setMarketOpen] = useState(true);
   const [boardOpen, setBoardOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
@@ -34,13 +33,7 @@ export default function Home() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [posts, setPosts] = useState(initialPosts);
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
-  const [speed, setSpeed] = useState(1);
   const mapRef = useRef<AquariumMapHandle>(null);
-
-  const handleSpeedChange = useCallback((s: number) => {
-    setSpeed(s);
-    mapRef.current?.setSpeed(s);
-  }, []);
 
   const handleStart = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
     setAgents(setupAgents);
@@ -88,10 +81,6 @@ export default function Home() {
     setActiveEvent({ text, impact, source: "user" });
   }, [currentRound]);
 
-  const nextRound = useCallback(() => {
-    setCurrentRound((r) => r + 1);
-  }, []);
-
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} />;
   }
@@ -108,9 +97,6 @@ export default function Home() {
       {/* HUD overlay */}
       <GameHUD
         round={currentRound}
-        playing={playing}
-        onTogglePlay={() => setPlaying(!playing)}
-        onNextRound={nextRound}
         onEvent={handleEvent}
         marketOpen={marketOpen}
         boardOpen={boardOpen}
@@ -122,8 +108,6 @@ export default function Home() {
         boardNotifications={posts.length}
         onZoomIn={() => mapRef.current?.zoomIn()}
         onZoomOut={() => mapRef.current?.zoomOut()}
-        speed={speed}
-        onSpeedChange={handleSpeedChange}
       />
 
       {/* Market panel - floating left, content-fit */}
