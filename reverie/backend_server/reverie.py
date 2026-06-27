@@ -423,6 +423,7 @@ class ReverieServer:
               snap = ctx.snapshot()
               movements["meta"]["market"] = snap["market"]
               movements["meta"]["posts"] = snap["posts"]
+              movements["meta"]["events"] = snap["events"]
               movements["meta"]["round"] = snap["round"]
           except Exception:
             pass

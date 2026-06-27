@@ -3,25 +3,17 @@
 import { useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import MarketPanel from "@/components/MarketPanel";
-import AquariumMap, { AquariumMapHandle } from "@/components/AquariumMap";
 import BoardFeed from "@/components/BoardFeed";
 import RoundReport from "@/components/RoundReport";
 import AgentDetail from "@/components/AgentDetail";
 import EventOverlay from "@/components/EventOverlay";
-import SetupScreen, { GameMode } from "@/components/SetupScreen";
+import SetupScreen from "@/components/SetupScreen";
 import GameHUD from "@/components/GameHUD";
 import { Agent } from "@/mock_data/agents";
 import { Asset, MarketData } from "@/mock_data/market";
-import { Post, posts as initialPosts } from "@/mock_data/posts";
+import { Post } from "@/mock_data/posts";
 import { rounds } from "@/mock_data/rounds";
 import { GameEvent } from "@/mock_data/events";
-import {
-  startGame,
-  submitEvent,
-  getReport,
-  GameState,
-  RoundReportData,
-} from "@/lib/api";
 import * as control from "@/lib/control";
 import type { ReverieMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
@@ -36,9 +28,6 @@ interface ActiveEvent {
   impact: "positive" | "negative" | "neutral";
   source: "user" | "system";
 }
-
-// "mock"/"backend" -> standalone market API (:8100); "canonical" -> live reverie.
-type Connection = "mock" | "backend" | "canonical";
 
 // Canonical mode fork + how many steps to queue up front.
 const FORK_SIM_CODE = "base_the_ville_market6";
@@ -72,24 +61,11 @@ export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
-  const [posts, setPosts] = useState<Post[]>(initialPosts);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
-  // Backend wiring state
-  const [connection, setConnection] = useState<Connection>("mock");
+  // Live reverie sim code, set once fork + run resolve.
   const [canonicalSim, setCanonicalSim] = useState<string | null>(null);
-  const [roundReport, setRoundReport] = useState<RoundReportData | null>(null);
-  const [overallMarkdown, setOverallMarkdown] = useState<string | null>(null);
-  const mapRef = useRef<AquariumMapHandle>(null);
   const reverieControlsRef = useRef<GameControls | null>(null);
-
-  /** Apply a backend GameState snapshot to local UI state. */
-  const applyGameState = useCallback((state: GameState) => {
-    setAgents(state.agents);
-    setMarketData(state.market);
-    setPosts(state.posts);
-    setEvents(state.events);
-    setCurrentRound(state.round);
-  }, []);
 
   /** Optimistic seed so the panels aren't empty before live data arrives. */
   const seedFromSetup = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
@@ -109,30 +85,16 @@ export default function Home() {
     setCurrentRound(1);
   }, []);
 
-  /** Standalone path: optimistic mock, then try the market API (:8100). */
-  const startStandalone = useCallback(
-    (setupAgents: Agent[]) => {
-      setConnection("mock");
-      startGame(setupAgents.length, 42)
-        .then((state) => {
-          applyGameState(state);
-          setConnection("backend");
-        })
-        .catch((err) => {
-          console.warn("[MarketAquarium] startGame failed, using mock:", err);
-          setConnection("mock");
-        });
-    },
-    [applyGameState]
-  );
+  const handleStart = useCallback(
+    (setupAgents: Agent[], setupAssets: Asset[]) => {
+      seedFromSetup(setupAgents, setupAssets);
+      setCanonicalSim(null);
+      setGameStarted(true);
 
-  /** Canonical path: fork + run the live reverie sim; fall back if unreachable. */
-  const startCanonical = useCallback(
-    (setupAgents: Agent[]) => {
+      // Canonical/live path: fork + run the reverie sim so the map renders
+      // immediately (agents live their day). The server auto-drops any prior
+      // sim, so restarting from setup just works.
       const sim = `market_${Date.now()}`;
-      setConnection("canonical");
-      // Fork + run so the map renders immediately (agents live their day). The
-      // server auto-drops any prior sim, so restarting from setup just works.
       control
         .start(FORK_SIM_CODE, sim)
         .then(() => control.run(CANONICAL_RUN_STEPS))
@@ -140,180 +102,80 @@ export default function Home() {
           setCanonicalSim(sim);
         })
         .catch((err) => {
-          console.warn(
-            "[MarketAquarium] canonical start failed, falling back to standalone:",
-            err
-          );
-          setCanonicalSim(null);
-          startStandalone(setupAgents);
+          console.warn("[MarketAquarium] canonical start failed:", err);
         });
     },
-    [startStandalone]
-  );
-
-  const handleStart = useCallback(
-    (setupAgents: Agent[], setupAssets: Asset[], mode: GameMode) => {
-      seedFromSetup(setupAgents, setupAssets);
-      setRoundReport(null);
-      setOverallMarkdown(null);
-      setCanonicalSim(null);
-      setGameStarted(true);
-
-      if (mode === "canonical") {
-        startCanonical(setupAgents);
-      } else {
-        startStandalone(setupAgents);
-      }
-    },
-    [seedFromSetup, startCanonical, startStandalone]
+    [seedFromSetup]
   );
 
   /** Canonical movement-update tick: drive panels from meta.market/posts/round. */
   const handleTick = useCallback((meta: ReverieMeta) => {
     if (meta.market) setMarketData(meta.market);
     if (meta.posts) setPosts(meta.posts);
+    if (meta.events) setEvents(meta.events);
     if (typeof meta.round === "number") setCurrentRound(meta.round);
   }, []);
 
-  const handleEvent = useCallback(
-    (text: string) => {
-      // Local mock behavior, used directly when offline and as an instant
-      // fallback if the backend call fails.
-      const mockEvent = () => {
-        const impact: "positive" | "negative" | "neutral" =
-          Math.random() > 0.5 ? "negative" : "positive";
-        const timestamp = new Date().toLocaleTimeString("ko-KR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        const newEvent: GameEvent = {
-          id: `e${Date.now()}`,
-          round: currentRound,
+  const handleEvent = useCallback((text: string) => {
+    // Inject the round's global event via the control server. Market/posts
+    // updates then flow back through handleTick on the next movement update.
+    // The sim is already running; agents pick the shock up on their next board
+    // visit (view_sns) and trade, and the day's price distortion reflects it
+    // at the day boundary.
+    control
+      .marketEvent({ text, is_rumor: false })
+      .then((res) => {
+        setActiveEvent({
           text,
+          impact: normalizeImpact(res.impact),
           source: "user",
-          impact,
-          timestamp,
-        };
-        setEvents((prev) => [newEvent, ...prev]);
-        setPosts((prev) => [
-          {
-            id: `p${Date.now()}`,
-            agentId: "system",
-            agentAlias: "시스템",
-            content: `[속보] ${text}`,
-            likes: 0,
-            comments: [],
-            timestamp,
-            round: currentRound,
-          },
-          ...prev,
-        ]);
-        setActiveEvent({ text, impact, source: "user" });
-      };
-
-      // Canonical: inject the round event via the control server. Market/posts
-      // updates then flow back through handleTick on the next movement update.
-      if (connection === "canonical") {
-        // The sim is already running; just inject the shock. Agents pick it up
-        // on their next board visit (view_sns) and trade, and the day's price
-        // distortion reflects it at the day boundary.
-        control
-          .marketEvent({ text, is_rumor: false })
-          .then((res) => {
-            setActiveEvent({
-              text,
-              impact: normalizeImpact(res.impact),
-              source: "user",
-            });
-          })
-          .catch((err) => {
-            console.warn("[MarketAquarium] marketEvent failed, using mock:", err);
-            mockEvent();
-          });
-        return;
-      }
-
-      if (connection !== "backend") {
-        mockEvent();
-        return;
-      }
-
-      submitEvent({ text, is_rumor: false })
-        .then((res) => {
-          applyGameState(res);
-          setRoundReport(res.round_report);
-          // Choreograph the map: agents walk to the board / exchange and back
-          // based on what they actually did this round. No-op in the mock path.
-          if (res.round_actions?.length) {
-            mapRef.current?.playRound(res.round_actions);
-          }
-          // Drive the event overlay from the freshly returned event's impact.
-          const justFired =
-            res.events.find((e) => e.text === text) ?? res.events[0];
-          setActiveEvent({
-            text,
-            impact: justFired?.impact ?? "neutral",
-            source: "user",
-          });
-        })
-        .catch((err) => {
-          console.warn("[MarketAquarium] submitEvent failed, using mock:", err);
-          mockEvent();
         });
-    },
-    [connection, currentRound, applyGameState]
-  );
+      })
+      .catch((err) => {
+        console.warn("[MarketAquarium] marketEvent failed:", err);
+        setActiveEvent({ text, impact: "neutral", source: "user" });
+      });
+  }, []);
 
   const handleToggleReport = useCallback(() => {
-    const next = !reportOpen;
-    setReportOpen(next);
-    if (next && connection === "backend") {
-      // Prefer the backend overall report when opening.
-      getReport()
-        .then((report) => setOverallMarkdown(report.markdown))
-        .catch((err) => {
-          console.warn("[MarketAquarium] getReport failed, using fallback:", err);
-          setOverallMarkdown(null);
-        });
-    }
-  }, [reportOpen, connection]);
+    setReportOpen((prev) => !prev);
+  }, []);
 
   const handleZoomIn = useCallback(() => {
-    if (connection === "canonical") reverieControlsRef.current?.zoomIn();
-    else mapRef.current?.zoomIn();
-  }, [connection]);
+    reverieControlsRef.current?.zoomIn();
+  }, []);
 
   const handleZoomOut = useCallback(() => {
-    if (connection === "canonical") reverieControlsRef.current?.zoomOut();
-    else mapRef.current?.zoomOut();
-  }, [connection]);
+    reverieControlsRef.current?.zoomOut();
+  }, []);
 
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} />;
   }
 
-  // Choose report content: backend overall report > latest round report > mock.
+  // Round report content: the matching mock round markdown (live overall report
+  // is not exposed by the control server in MVP).
   const mockReport =
     rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
   const reportForView = {
-    round: roundReport?.round ?? currentRound,
-    markdown: overallMarkdown ?? roundReport?.markdown ?? mockReport.markdown,
+    round: currentRound,
+    markdown: mockReport.markdown,
   };
-
-  const isCanonical = connection === "canonical" && canonicalSim;
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-surface-primary">
-      {/* Full-screen game map */}
+      {/* Full-screen game map (canonical reverie viewer) */}
       <div className="absolute inset-0">
-        {isCanonical ? (
+        {canonicalSim ? (
           <ReverieGame
             simCode={canonicalSim}
             onTick={handleTick}
             controlsRef={reverieControlsRef}
           />
         ) : (
-          <AquariumMap ref={mapRef} agents={agents} onSelectAgent={setSelectedAgent} />
+          <div className="h-full w-full flex items-center justify-center text-text-tertiary text-sm">
+            라이브 시뮬레이션을 준비하는 중...
+          </div>
         )}
       </div>
 
@@ -346,7 +208,7 @@ export default function Home() {
       {boardOpen && (
         <div className="absolute right-4 top-16 bottom-16 w-[370px] z-20">
           <div className="h-full rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
-            <BoardFeed posts={posts} />
+            <BoardFeed posts={posts} events={events} />
           </div>
         </div>
       )}

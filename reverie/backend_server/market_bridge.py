@@ -128,10 +128,9 @@ class MarketContext:
                    impact=impact, timestamp=timestamp, is_rumor=is_rumor, cred_source=cred_source)
         self.current_event = ev
         self.events.insert(0, ev)
-        # news-bot style headline post
-        self.posts.insert(0, Post(id=f"p_event_{self.round}", agentId="system",
-                                  agentAlias="시스템", content=f"[속보] {text}",
-                                  timestamp=timestamp, round=self.round))
+        # The event is a NOTICE (announcement), not a feed post -- it lives in
+        # self.events and the frontend shows it as a pinned notice. Agents'
+        # posts/comments are the Twitter-like feed (self.posts).
         # FR-2/FR-2b: credibility-gated direct emotion from the event
         for ag in self.agents.values():
             cred = credibility.generate_news_credibility(self.client, ag, text,

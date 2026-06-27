@@ -170,24 +170,72 @@ def _agent_type_in_prompt(text: str) -> str:
     return m.group(1) if m else ""
 
 
+# Several in-character lines per persona/sentiment so posts vary across rounds.
+_POST_POOL: dict[str, dict[str, list[str]]] = {
+    "panic_seller": {
+        "neg": ["이거 진짜 위험한 거 아니에요? 일단 정리해야 하나...",
+                "손절 각인가... 더 떨어지기 전에 던진다",
+                "어젯밤부터 불안해서 잠을 못 잤어요",
+                "지금이라도 비중 줄여야 할까요 ㅠㅠ"],
+        "pos": ["오른다는데 지금 들어가도 되나요?",
+                "휴 한숨 돌렸다... 그래도 불안은 여전",
+                "반등이 진짜일까요? 못 믿겠어요"],
+    },
+    "fomo_trader": {
+        "neg": ["눌림목인가? 줍줍 타이밍?", "이 정도 빠지면 단타 각인데",
+                "공포에 사라던데 지금인가"],
+        "pos": ["지금 안 사면 후회한다. 가즈아", "불기둥 간다 풀매수",
+                "남들 다 타는데 나만 빠질 순 없지"],
+    },
+    "conspiracy": {
+        "neg": ["이거 그냥 사고 아닙니다. 큰손들이 미리 알고 움직였어요",
+                "윗선에서 정보 샌 거 확실합니다", "차트가 말해주잖아요. 작전이에요"],
+        "pos": ["이 상승 누가 만들었을까요? 다 계획입니다",
+                "개미 털고 올리는 전형적 패턴"],
+    },
+    "value_investor": {
+        "neg": ["근거가 약합니다. 펀더멘탈은 그대로예요.",
+                "루머에 과민 반응하는 구간이네요.",
+                "공포가 과합니다. 가치는 변하지 않았습니다."],
+        "pos": ["과열입니다. 차분히 보죠.", "밸류에이션이 부담스러운 레벨입니다.",
+                "기대가 가격에 선반영된 듯합니다."],
+    },
+    "whale": {
+        "neg": ["대중이 공포일 때가 매집 기회죠.", "조용히 담을 구간입니다.",
+                "패닉은 길지 않습니다. 물량 받습니다."],
+        "pos": ["유동성 흐름을 봅니다.", "과열 구간, 일부 차익 실현 고려.",
+                "거시 사이클상 아직 여유 있습니다."],
+    },
+    "contrarian": {
+        "neg": ["다들 파니까 저는 삽니다.", "공포지수 보면 지금이 바닥 근처죠.",
+                "역추세 진입 시점입니다."],
+        "pos": ["다들 탐욕이면 저는 덜어냅니다.", "환호할 때가 팔 때죠.",
+                "군중과 반대로 갑니다."],
+    },
+    "quant": {
+        "neg": ["변동성 확대. 패닉셀 비율이 비정상적으로 높습니다.",
+                "지표상 과매도. 단기 반등 확률 상승.",
+                "거래량 급증, 추세 전환 신호 감지."],
+        "pos": ["신호는 중립. 추세 확인 중.", "모멘텀 약화. 비중 조절 신호.",
+                "RSI 과매수권 진입."],
+    },
+    "news_bot": {
+        "neg": ["요약: 악재성 이슈로 변동성 확대. 추이 관찰 필요.",
+                "속보 정리: 시장 하방 압력 우세.", "팩트체크: 확인되지 않은 정보 다수."],
+        "pos": ["요약: 호재성 이슈로 투자심리 개선.",
+                "속보 정리: 매수세 유입 관찰됨.", "핵심: 단기 반등 기대감 확산."],
+    },
+}
+
+
 def _persona_post(text: str) -> str:
-    neg = _is_negative(text)
     t = _agent_type_in_prompt(text)
-    if t == "panic_seller":
-        return "이거 진짜 위험한 거 아니에요? 일단 정리해야 하나..." if neg else "오른다는데 지금 들어가도 되나요?"
-    if t in ("fomo_trader", "conspiracy"):
-        return "눌림목인가? 줍줍 타이밍?" if neg else "지금 안 사면 후회한다. 가즈아"
-    if t == "value_investor":
-        return "근거가 약합니다. 펀더멘탈은 그대로예요." if neg else "과열입니다. 차분히 보죠."
-    if t == "whale":
-        return "대중이 공포일 때가 매집 기회죠." if neg else "유동성 흐름을 봅니다."
-    if t == "contrarian":
-        return "다들 파니까 저는 삽니다." if neg else "다들 탐욕이면 저는 덜어냅니다."
-    if t == "quant":
-        return "변동성 확대. 패닉셀 비율이 비정상적으로 높습니다." if neg else "신호는 중립. 추세 확인 중."
-    if t == "news_bot":
-        return "요약: 변동성 확대 구간. 추이 관찰 필요."
-    return "시장 분위기가 심상치 않네요." if neg else "분위기 나쁘지 않은데요."
+    sent = "neg" if _is_negative(text) else "pos"
+    pool = _POST_POOL.get(t, {}).get(sent) or _POST_POOL.get(t, {}).get("neg")
+    if not pool:
+        return "시장 분위기가 심상치 않네요." if sent == "neg" else "분위기 나쁘지 않은데요."
+    # Vary across rounds: the prompt embeds the (growing) feed, so its hash shifts.
+    return pool[hash(text) % len(pool)]
 
 
 def scripted_client() -> "FakeLLM":
@@ -197,8 +245,13 @@ def scripted_client() -> "FakeLLM":
                 return json.dumps({"fear_delta": 9, "greed_delta": -4})
             return json.dumps({"fear_delta": -4, "greed_delta": 8})
         if "kind" in user:
+            # Reactive personas COMMENT on others' posts (populates comment
+            # threads); the rest POST their own. If no thread exists yet, the SNS
+            # layer downgrades a COMMENT to a POST automatically.
+            t = _agent_type_in_prompt(user)
+            kind = "COMMENT" if t in ("value_investor", "quant", "contrarian", "news_bot") else "POST"
             return json.dumps(
-                {"kind": "POST", "text": _persona_post(user), "symbol_tags": ["BTC"]}
+                {"kind": kind, "text": _persona_post(user), "symbol_tags": ["BTC"]}
             )
         if "score" in user:
             low = user.lower()

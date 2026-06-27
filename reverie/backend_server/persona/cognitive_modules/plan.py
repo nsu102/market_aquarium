@@ -500,15 +500,19 @@ def _long_term_planning(persona, new_day):
   try:
     from persona.cognitive_modules.schedule_inject import inject_board_then_exchange
     import market_bridge
-    # Inject at/after the later of "current time" and "an hour after waking", so
-    # the slots are always in the future regardless of the day's start hour.
-    ct = persona.scratch.curr_time
-    cur_min = (ct.hour * 60 + ct.minute) if ct else 0
-    now_min = max(cur_min, (int(wake_up_hour) + 1) * 60)
-    persona.scratch.f_daily_schedule = inject_board_then_exchange(
-        persona.scratch.f_daily_schedule, now_min,
-        board_activity=market_bridge.BOARD_ACTIVITY, board_dur=120,
-        exchange_activity=market_bridge.EXCHANGE_ACTIVITY, exchange_dur=120)
+    _ctx = market_bridge.get_context()
+    # ONLY inject board/exchange visits when there is an ACTIVE market event.
+    # Otherwise agents follow their normal routine (no event -> no market rush).
+    if _ctx is not None and _ctx.current_event is not None:
+      # Inject at/after the later of "current time" and "an hour after waking",
+      # so the slots are always in the future regardless of the day's start hour.
+      ct = persona.scratch.curr_time
+      cur_min = (ct.hour * 60 + ct.minute) if ct else 0
+      now_min = max(cur_min, (int(wake_up_hour) + 1) * 60)
+      persona.scratch.f_daily_schedule = inject_board_then_exchange(
+          persona.scratch.f_daily_schedule, now_min,
+          board_activity=market_bridge.BOARD_ACTIVITY, board_dur=120,
+          exchange_activity=market_bridge.EXCHANGE_ACTIVITY, exchange_dur=120)
   except Exception:
     pass
 

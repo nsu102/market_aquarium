@@ -13,11 +13,12 @@
 
 import { MarketData } from "@/mock_data/market";
 import { Post } from "@/mock_data/posts";
+import { GameEvent } from "@/mock_data/events";
 
 // Live mode uses ONE merged backend (live_server) serving both /api/* and
-// /control/* on the same port, so the data API defaults to the control port.
+// /control/* on the same port (default :8000).
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8001";
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 /** Absolute URL for a static asset served by api_server (e.g. "assets/..."). */
 export function assetUrl(path: string): string {
@@ -76,6 +77,7 @@ export interface ReverieMeta {
   curr_time?: string;
   market?: MarketData;
   posts?: Post[];
+  events?: GameEvent[];
   round?: number;
 }
 

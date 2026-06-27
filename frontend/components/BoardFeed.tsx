@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Post } from "@/mock_data/posts";
+import { GameEvent } from "@/mock_data/events";
 import {
   Heart,
   MessageCircle,
@@ -12,12 +13,44 @@ import {
   MoreHorizontal,
   Share2,
   Bookmark,
+  Megaphone,
 } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
 
 const tabs = ["전체", "BTC", "ETH", "SOL"];
 
-export default function BoardFeed({ posts }: { posts: Post[] }) {
+/** impact → notice 배너 색상 토큰 (기존 Tailwind 팔레트 사용). */
+const IMPACT_STYLES: Record<
+  GameEvent["impact"],
+  { wrap: string; icon: string; label: string; labelText: string }
+> = {
+  negative: {
+    wrap: "bg-accent-red/8 border-accent-red/25",
+    icon: "text-accent-red",
+    label: "bg-accent-red/12 text-accent-red",
+    labelText: "속보",
+  },
+  positive: {
+    wrap: "bg-accent-green/8 border-accent-green/25",
+    icon: "text-accent-green",
+    label: "bg-accent-green/12 text-accent-green",
+    labelText: "속보",
+  },
+  neutral: {
+    wrap: "bg-surface-secondary border-border-light",
+    icon: "text-text-secondary",
+    label: "bg-surface-tertiary text-text-secondary",
+    labelText: "공지",
+  },
+};
+
+export default function BoardFeed({
+  posts,
+  events = [],
+}: {
+  posts: Post[];
+  events?: GameEvent[];
+}) {
   const [activeTab, setActiveTab] = useState("전체");
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
@@ -32,6 +65,10 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
     activeTab === "전체"
       ? posts
       : posts.filter((p) => p.asset === activeTab);
+
+  // 최신 이벤트가 마지막에 들어온다고 가정: 가장 최근 1건을 크게, 이전 건은 작게.
+  const latestEvent = events.length > 0 ? events[events.length - 1] : null;
+  const priorEvents = events.length > 1 ? events.slice(0, -1).slice(-3).reverse() : [];
 
   const toggleLike = (id: string) => {
     setLikedPosts((prev) => {
@@ -101,8 +138,49 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
         {/* Divider */}
         <div className="h-px bg-border-light" />
 
-        {/* Posts feed */}
+        {/* Scrollable region: pinned notice + tweet feed */}
         <div className="flex-1 overflow-y-auto bg-surface-secondary/30">
+          {/* PINNED NOTICE — 이벤트 공지 배너 (트윗과 시각적으로 구분) */}
+          {latestEvent && (
+            <div className="px-3 pt-3 pb-1 bg-surface-secondary/30">
+              {(() => {
+                const s = IMPACT_STYLES[latestEvent.impact];
+                return (
+                  <div className={`rounded-2xl border ${s.wrap} px-3.5 py-3`}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Megaphone size={14} className={s.icon} strokeWidth={2.2} />
+                      <span
+                        className={`text-[9px] font-bold px-1.5 py-[2px] rounded-md tracking-wide ${s.label}`}
+                      >
+                        {s.labelText}
+                      </span>
+                      <span className="text-[9px] text-text-tertiary font-mono ml-auto">
+                        R{latestEvent.round} {latestEvent.timestamp}
+                      </span>
+                    </div>
+                    <p className="text-[12.5px] font-semibold text-text-primary leading-[1.5]">
+                      {latestEvent.text}
+                    </p>
+                    {priorEvents.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-border-light/60 space-y-1">
+                        {priorEvents.map((ev) => (
+                          <div
+                            key={ev.id}
+                            className="flex items-baseline gap-1.5 text-[10px] text-text-tertiary"
+                          >
+                            <span className="font-mono shrink-0">R{ev.round}</span>
+                            <span className="truncate leading-[1.4]">{ev.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* TWEET FEED */}
           {filtered.map((post, idx) => {
             const AgentIcon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
             const liked = likedPosts.has(post.id);
@@ -161,7 +239,10 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
                     </button>
                     <button
                       onClick={() => toggleComments(post.id)}
-                      className="flex items-center gap-1 text-[11px] hover:text-accent-blue transition cursor-pointer"
+                      aria-expanded={showComments}
+                      className={`flex items-center gap-1 text-[11px] transition cursor-pointer ${
+                        showComments ? "text-accent-blue" : "hover:text-accent-blue"
+                      }`}
                     >
                       <MessageCircle size={14} strokeWidth={1.8} />
                       <span className="font-medium">{post.comments.length}</span>
@@ -175,27 +256,33 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
                   </button>
                 </div>
 
-                {/* Comments (expandable) */}
-                {post.comments.length > 0 && showComments && (
+                {/* Comments (per-post expandable) */}
+                {showComments && (
                   <div className="mt-3 pt-2.5 border-t border-border-light space-y-2.5">
-                    {post.comments.map((c, i) => {
-                      const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
-                      return (
-                        <div key={i} className="flex items-start gap-2">
-                          <div className="w-6 h-6 rounded-full bg-surface-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <CIcon size={11} className="text-text-tertiary" />
+                    {post.comments.length === 0 ? (
+                      <p className="text-[11px] text-text-tertiary">
+                        아직 댓글이 없습니다
+                      </p>
+                    ) : (
+                      post.comments.map((c, i) => {
+                        const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
+                        return (
+                          <div key={i} className="flex items-start gap-2">
+                            <div className="w-6 h-6 rounded-full bg-surface-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <CIcon size={11} className="text-text-tertiary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-[11px] font-semibold text-text-primary">
+                                {c.agentAlias}
+                              </span>
+                              <p className="text-[11px] text-text-secondary leading-[1.5] mt-0.5">
+                                {c.content}
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-[11px] font-semibold text-text-primary">
-                              {c.agentAlias}
-                            </span>
-                            <p className="text-[11px] text-text-secondary leading-[1.5] mt-0.5">
-                              {c.content}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </div>
                 )}
 
