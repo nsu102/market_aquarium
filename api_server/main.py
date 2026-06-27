@@ -354,9 +354,15 @@ def api_update_environment(body: UpdateEnvironmentBody):
   response_data: Dict[str, Any] = {"<step>": -1}
   move_path = fpath("storage", body.sim_code, "movement", f"{body.step}.json")
   if check_if_file_exists(move_path):
-    with open(move_path) as json_file:
-      response_data = json.load(json_file)
+    # The backend may be mid-write on this file (the engine writes it while the
+    # frontend polls). A partial/empty read raises JSONDecodeError -- treat that
+    # as "not ready yet" so the client simply retries on the next poll.
+    try:
+      with open(move_path) as json_file:
+        response_data = json.load(json_file)
       response_data["<step>"] = body.step
+    except (ValueError, OSError):
+      response_data = {"<step>": -1}
 
   return JSONResponse(response_data)
 

@@ -115,6 +115,11 @@ def _drop_instance():
   STATE.sim_code = None
   STATE.running_steps = False
   STATE.run_thread = None
+  try:
+    import market_bridge
+    market_bridge.set_context(None)
+  except Exception:
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +199,16 @@ def start(body: StartBody):
     STATE.running_steps = False
     STATE.last_output = ""
     STATE.error = None
+
+    # Create the market context NOW (at fork time), not on first run, so the
+    # round event can be injected before the day is run. start_server only
+    # initialises it if absent, so this takes precedence.
+    try:
+      import market_bridge
+      market_bridge.set_context(None)
+      market_bridge.init_context(list(rs.personas.keys()))
+    except Exception as e:
+      STATE.error = str(e)
 
   return {"status": "started", "sim_code": rs.sim_code, "step": rs.step}
 

@@ -42,7 +42,10 @@ type Connection = "mock" | "backend" | "canonical";
 
 // Canonical mode fork + how many steps to queue up front.
 const FORK_SIM_CODE = "base_the_ville_market6";
-const CANONICAL_RUN_STEPS = 3000;
+// One in-game day = 1200 render ticks (sec_per_step=72). We run one day per
+// user event so the round is event-driven: nothing advances until you send an
+// event, then that day plays out.
+const STEPS_PER_DAY = 1200;
 
 /** Normalize the control server's event impact into the overlay's enum. */
 function normalizeImpact(
@@ -128,13 +131,20 @@ export default function Home() {
     (setupAgents: Agent[]) => {
       const sim = `market_${Date.now()}`;
       setConnection("canonical");
+      // Fork only -- do NOT run yet. The sim stays paused until the user sends
+      // the round's event (handleEvent then injects it and runs that day).
       control
         .start(FORK_SIM_CODE, sim)
-        .then(() => control.run(CANONICAL_RUN_STEPS))
         .then(() => {
           setCanonicalSim(sim);
         })
         .catch((err) => {
+          // "already loaded" just means a prior start (e.g. React strict-mode
+          // double-invoke) succeeded -- treat as success, stay canonical.
+          if (String(err?.message || err).includes("already loaded")) {
+            setCanonicalSim(sim);
+            return;
+          }
           console.warn(
             "[MarketAquarium] canonical start failed, falling back to standalone:",
             err
@@ -209,6 +219,8 @@ export default function Home() {
       // Canonical: inject the round event via the control server. Market/posts
       // updates then flow back through handleTick on the next movement update.
       if (connection === "canonical") {
+        // Inject the round's event, THEN run that in-game day so the shock plays
+        // out (event-driven: the sim only advances after you send an event).
         control
           .marketEvent({ text, is_rumor: false })
           .then((res) => {
@@ -216,6 +228,10 @@ export default function Home() {
               text,
               impact: normalizeImpact(res.impact),
               source: "user",
+            });
+            return control.run(STEPS_PER_DAY).catch((e) => {
+              // a run may already be in progress from the previous day; ignore.
+              console.warn("[MarketAquarium] run (already running?):", e);
             });
           })
           .catch((err) => {

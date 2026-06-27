@@ -1,16 +1,20 @@
-"""Mimic the frontend ReverieGame loop against the running servers to verify the
-canonical live stack end-to-end (control_server :8001 + api_server :8000).
+"""Self-test the canonical live stack end-to-end against the running servers,
+using the EVENT-DRIVEN flow (start forks only; event injects then runs a day).
 
-Run while both servers are up (control_server ideally in MARKET_STUB_LLM mode for speed):
+Mimics the frontend ReverieGame loop (process -> update -> execute) and asserts
+the full round: agents walk -> board posts (view_sns) -> exchange trade -> day
+boundary price distortion + round report.
+
+Run with api_server:8000 + control_server:8001 up (control ideally MARKET_STUB_LLM=1).
     python backend/tools/drive_live.py
 """
 import json
-import sys
 import time
 import urllib.request
 
 API = "http://127.0.0.1:8000"
 CTRL = "http://127.0.0.1:8001"
+STEPS = 1300  # > one in-game day (1200) so we cross midnight -> end_round
 
 
 def post(url, body):
@@ -23,57 +27,71 @@ def get(url):
     return json.load(urllib.request.urlopen(url, timeout=60))
 
 
+def snap():
+    return get(f"{CTRL}/control/market/state")
+
+
 def main():
     sim = "market_drive_%d" % int(time.time())
     print("start:", post(f"{CTRL}/control/start",
                          {"fork_sim_code": "base_the_ville_market6", "sim_code": sim}))
-    print("run:", post(f"{CTRL}/control/run", {"count": 400}))
-    time.sleep(1)
+
+    s0 = snap()
+    cash0 = {a["alias"]: a["cash"] for a in s0.get("agents", [])}
+    price0 = {a["symbol"]: a["price"] for a in s0.get("market", {}).get("assets", [])}
+    print(f"pre-event: ready={s0.get('ready')} round={s0.get('round')} posts={len(s0.get('posts', []))}")
+
     print("event:", post(f"{CTRL}/control/market/event",
                         {"text": "대형 거래소 해킹 루머가 퍼졌다", "is_rumor": True}))
+    print("run:", post(f"{CTRL}/control/run", {"count": STEPS}))
 
     home = get(f"{API}/api/home")
     names = [p["original"] for p in home["persona_names"]]
-    pos = {n: {"maze": "the_ville", "x": x, "y": y}
-           for n, x, y in home["persona_init_pos"]}
+    pos = {n: {"maze": "the_ville", "x": x, "y": y} for n, x, y in home["persona_init_pos"]}
 
-    board = exch = 0
-    for step in range(400):
-        # post current positions for this step, then wait for movement
-        post(f"{API}/api/environment/process",
-             {"step": step, "sim_code": sim, "environment": pos})
+    first_post_step = first_trade_step = round_end_step = None
+    last_round = s0.get("round", 0)
+
+    for step in range(STEPS):
+        post(f"{API}/api/environment/process", {"step": step, "sim_code": sim, "environment": pos})
         mv = None
-        for _ in range(100):
+        for _ in range(200):
             r = post(f"{API}/api/environment/update", {"step": step, "sim_code": sim})
-            if r.get("<step>") == step:   # api marks readiness with the literal "<step>" key
+            if r.get("<step>") == step:
                 mv = r
                 break
-            time.sleep(0.05)
+            time.sleep(0.02)
         if mv is None:
-            print("step", step, "timed out waiting for movement")
+            print(f"step {step}: timed out (run may have ended)")
             break
-        personas = mv["persona"]
         for n in names:
-            m = personas[n]["movement"]
+            m = mv["persona"][n]["movement"]
             pos[n] = {"maze": "the_ville", "x": m[0], "y": m[1]}
         meta = mv.get("meta", {})
-        descs = " | ".join(personas[n]["description"] for n in names)
-        if "Hobbs Cafe" in descs and board == 0:
-            board = step
-            print(f"  step {step}: someone AT/HEADING board. posts={len(meta.get('posts', []))}")
-        if "Willows Market" in descs and exch == 0:
-            exch = step
-            print(f"  step {step}: someone AT/HEADING exchange.")
-        mk = meta.get("market") or {}
-        if step % 40 == 0:
+        posts = meta.get("posts", [])
+        if first_post_step is None and len([p for p in posts if p.get("agentId") != "system"]) > 0:
+            first_post_step = step
+        if step % 150 == 0:
+            mk = meta.get("market", {})
             print(f"step {step} time={meta.get('curr_time')} round={meta.get('round')} "
-                  f"posts={len(meta.get('posts', []))} fgi={mk.get('fearGreedIndex')}")
-        if len(meta.get("posts", [])) > 1:
-            # market actions started producing posts
-            if step > (board or 0) + 5:
-                pass
-    print("done. board_step=", board, "exch_step=", exch)
-    print("exit:", post(f"{CTRL}/control/exit", {}))
+                  f"posts={len(posts)} fgi={round(mk.get('fearGreedIndex', 0), 1)}")
+
+    # final snapshot + assertions
+    sN = snap()
+    cashN = {a["alias"]: a["cash"] for a in sN.get("agents", [])}
+    priceN = {a["symbol"]: a["price"] for a in sN.get("market", {}).get("assets", [])}
+    postsN = sN.get("posts", [])
+    traded = [n for n in cash0 if abs(cashN.get(n, cash0[n]) - cash0[n]) > 1e-6]
+    moved_price = [s for s in price0 if abs(priceN.get(s, price0[s]) - price0[s]) > 1e-6]
+
+    print("\n==== RESULT ====")
+    print(f"posts (board view_sns):   {len(postsN)}  -> {'PASS' if len(postsN) > 1 else 'FAIL'}")
+    print(f"agents that traded:       {len(traded)} {traded}  -> {'PASS' if traded else 'FAIL (no trade yet)'}")
+    print(f"assets w/ price change:   {len(moved_price)}  -> {'PASS' if moved_price else 'FAIL (no round-end price yet)'}")
+    print(f"round:                    {sN.get('round')}")
+    for p in postsN[:8]:
+        print("   post:", p.get("agentAlias"), ":", (p.get("content") or "")[:36])
+    print("exit:", post(f"{CTRL}/control/finish", {}))
 
 
 if __name__ == "__main__":
