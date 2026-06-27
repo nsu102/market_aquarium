@@ -310,3 +310,35 @@ def exit_sim():
     _drop_instance()
 
   return {"status": "exited"}
+
+
+# ---------------------------------------------------------------------------
+# Market Aquarium endpoints -- inject the round's user event into the running
+# reverie MarketContext, and read live market state. The context is created
+# inside ReverieServer.start_server (so it exists once a `run` is active).
+# ---------------------------------------------------------------------------
+class MarketEventBody(BaseModel):
+  text: str
+  is_rumor: bool = False
+  source: str = "user"
+
+
+@app.post("/control/market/event")
+def market_event(body: MarketEventBody):
+  import market_bridge
+  ctx = market_bridge.get_context()
+  if ctx is None:
+    return _bad_request("market context not ready (start the sim and run first)")
+  ev = ctx.set_event(body.text, source=body.source, is_rumor=body.is_rumor)
+  return {"status": "ok", "round": ctx.round, "event": ev.text, "impact": ev.impact.value}
+
+
+@app.get("/control/market/state")
+def market_state():
+  import market_bridge
+  ctx = market_bridge.get_context()
+  if ctx is None:
+    return {"ready": False}
+  snap = ctx.snapshot()
+  snap["ready"] = True
+  return snap
