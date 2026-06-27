@@ -93,6 +93,41 @@ export const AGENT_PROFILES: AgentProfile[] = [
   },
 ];
 
+/* All 25 available character sprites for custom agents */
+export const CHARACTER_POOL = [
+  { name: "Jane_Moreno", label: "Jane Moreno" },
+  { name: "Eddy_Lin", label: "Eddy Lin" },
+  { name: "Klaus_Mueller", label: "Klaus Mueller" },
+  { name: "Rajiv_Patel", label: "Rajiv Patel" },
+  { name: "Arthur_Burton", label: "Arthur Burton" },
+  { name: "Wolfgang_Schulz", label: "Wolfgang Schulz" },
+  { name: "Sam_Moore", label: "Sam Moore" },
+  { name: "Abigail_Chen", label: "Abigail Chen" },
+  { name: "Adam_Smith", label: "Adam Smith" },
+  { name: "Ayesha_Khan", label: "Ayesha Khan" },
+  { name: "Carlos_Gomez", label: "Carlos Gomez" },
+  { name: "Carmen_Ortiz", label: "Carmen Ortiz" },
+  { name: "Francisco_Lopez", label: "Francisco Lopez" },
+  { name: "Giorgio_Rossi", label: "Giorgio Rossi" },
+  { name: "Hailey_Johnson", label: "Hailey Johnson" },
+  { name: "Isabella_Rodriguez", label: "Isabella Rodriguez" },
+  { name: "Jennifer_Moore", label: "Jennifer Moore" },
+  { name: "John_Lin", label: "John Lin" },
+  { name: "Latoya_Williams", label: "Latoya Williams" },
+  { name: "Maria_Lopez", label: "Maria Lopez" },
+  { name: "Mei_Lin", label: "Mei Lin" },
+  { name: "Ryan_Park", label: "Ryan Park" },
+  { name: "Tamara_Taylor", label: "Tamara Taylor" },
+  { name: "Tom_Moreno", label: "Tom Moreno" },
+  { name: "Yuriko_Yamamoto", label: "Yuriko Yamamoto" },
+];
+
+const CUSTOM_COLORS = [
+  "#C85A4A", "#D4A843", "#5B8FB9", "#8B6DB0", "#5B8C3E", "#5BA88C",
+  "#D48A3C", "#7B6BA0", "#4A8B7B", "#B85A6A", "#6B8B4A", "#8B7B3E",
+  "#5A7BC8", "#C87A5A", "#6BAA6B", "#AA6B8B", "#8BAA5B", "#5B6BAA",
+];
+
 export const DEFAULT_ASSETS = [
   { symbol: "BTC", name: "비트코인", price: 92450000 },
   { symbol: "ETH", name: "이더리움", price: 4520000 },

@@ -4,8 +4,7 @@ import { useState, useMemo } from "react";
 import Image from "next/image";
 import { Agent } from "@/mock_data/agents";
 import { Asset } from "@/mock_data/market";
-import { AGENT_PROFILES, DEFAULT_ASSETS } from "@/constants/agentProfiles";
-import { AGENT_ICONS } from "@/lib/agentIcons";
+import { AGENT_PROFILES, DEFAULT_ASSETS, CHARACTER_POOL } from "@/constants/agentProfiles";
 import {
   Play,
   Plus,
@@ -24,6 +23,8 @@ import {
   Shield,
   Coins,
   TrendingUp,
+  Trash2,
+  UserPlus,
 } from "lucide-react";
 import { filterNumeric, filterInt } from "@/utils/numberInput";
 
@@ -39,6 +40,10 @@ interface SetupAgent {
   greed: number;
   color: string;
   enabled: boolean;
+  sprite: string;
+  profile: string;
+  traits: string[];
+  description: string;
 }
 
 interface Props {
@@ -59,8 +64,14 @@ function buildDefault(): SetupAgent[] {
   return AGENT_PROFILES.map((p) => ({
     id: p.id, alias: p.alias, type: p.type, cash: p.defaultCash,
     portfolio: [], fear: p.defaultFear, greed: p.defaultGreed, color: p.color, enabled: true,
+    sprite: p.sprite, profile: p.profile, traits: p.traits, description: p.description,
   }));
 }
+
+const CUSTOM_COLORS = [
+  "#C85A4A", "#D4A843", "#5B8FB9", "#8B6DB0", "#5B8C3E", "#5BA88C",
+  "#D48A3C", "#7B6BA0", "#4A8B7B", "#B85A6A", "#6B8B4A", "#8B7B3E",
+];
 
 /* ── Component ── */
 
@@ -70,7 +81,6 @@ export default function SetupScreen({ onStart }: Props) {
   const [editingAsset, setEditingAsset] = useState<string | null>(null);
 
   const selected = agents[selectedIdx];
-  const profile = AGENT_PROFILES[selectedIdx];
   const enabledAgents = agents.filter((a) => a.enabled);
 
   const updateAgent = (patch: Partial<SetupAgent>) => {
@@ -94,21 +104,52 @@ export default function SetupScreen({ onStart }: Props) {
 
   const randomize = () => {
     setAgents((prev) =>
-      prev.map((a, i) => {
-        const p = AGENT_PROFILES[i];
-        return {
-          ...a,
-          cash: Math.round(p.defaultCash * (0.3 + Math.random() * 1.4)),
-          fear: Math.round(Math.random() * 100),
-          greed: Math.round(Math.random() * 100),
-          portfolio: DEFAULT_ASSETS.filter(() => Math.random() > 0.5).map((ea) => ({
-            asset: ea.symbol,
-            amount: +(Math.random() * (ea.price > 1e6 ? 1 : 100)).toFixed(ea.price > 1e6 ? 4 : 2),
-            avgPrice: Math.round(ea.price * (0.8 + Math.random() * 0.4)),
-          })),
-        };
-      })
+      prev.map((a) => ({
+        ...a,
+        cash: Math.round(a.cash * (0.3 + Math.random() * 1.4) || 5000000),
+        fear: Math.round(Math.random() * 100),
+        greed: Math.round(Math.random() * 100),
+        portfolio: DEFAULT_ASSETS.filter(() => Math.random() > 0.5).map((ea) => ({
+          asset: ea.symbol,
+          amount: +(Math.random() * (ea.price > 1e6 ? 1 : 100)).toFixed(ea.price > 1e6 ? 4 : 2),
+          avgPrice: Math.round(ea.price * (0.8 + Math.random() * 0.4)),
+        })),
+      }))
     );
+  };
+
+  const addAgent = () => {
+    if (agents.length >= 25) return;
+    const usedSprites = new Set(agents.map((a) => a.sprite));
+    const available = CHARACTER_POOL.filter(
+      (c) => !usedSprites.has(`/assets/characters/${c.name}.png`)
+    );
+    if (available.length === 0) return;
+    const char = available[0];
+    const idx = agents.length;
+    const newAgent: SetupAgent = {
+      id: `custom_${Date.now()}`,
+      alias: `에이전트 ${idx + 1}`,
+      type: "custom",
+      cash: 10000000,
+      portfolio: [],
+      fear: 50,
+      greed: 50,
+      color: CUSTOM_COLORS[idx % CUSTOM_COLORS.length],
+      enabled: true,
+      sprite: `/assets/characters/${char.name}.png`,
+      profile: `/assets/characters/profile/${char.name}.png`,
+      traits: ["커스텀"],
+      description: "사용자가 추가한 에이전트입니다.",
+    };
+    setAgents((prev) => [...prev, newAgent]);
+    setSelectedIdx(agents.length);
+  };
+
+  const removeAgent = (idx: number) => {
+    if (agents.length <= 2) return;
+    setAgents((prev) => prev.filter((_, i) => i !== idx));
+    setSelectedIdx((prev) => Math.min(prev, agents.length - 2));
   };
 
   const reset = () => { setAgents(buildDefault()); setSelectedIdx(0); };
@@ -166,7 +207,6 @@ export default function SetupScreen({ onStart }: Props) {
             </div>
             <div className="flex-1 overflow-y-auto">
               {agents.map((agent, idx) => {
-                const p = AGENT_PROFILES[idx];
                 const sel = idx === selectedIdx;
                 return (
                   <button
@@ -177,7 +217,7 @@ export default function SetupScreen({ onStart }: Props) {
                     } ${!agent.enabled ? "opacity-25" : ""}`}
                   >
                     <div className="w-6 h-6 rounded-[3px] bg-[#2a2318] border border-[#3d3428]/40 overflow-hidden flex items-center justify-center flex-shrink-0">
-                      <Image src={p.profile} alt="" width={20} height={20} style={{ imageRendering: "pixelated" }} />
+                      <Image src={agent.profile} alt="" width={20} height={20} style={{ imageRendering: "pixelated" }} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[10px] font-medium text-[#d4c8a8] truncate leading-tight">{agent.alias}</div>
@@ -187,6 +227,16 @@ export default function SetupScreen({ onStart }: Props) {
                 );
               })}
             </div>
+            {/* Add agent button */}
+            {agents.length < 25 && (
+              <button
+                onClick={addAgent}
+                className="flex items-center justify-center gap-1 py-2 border-t border-[#2a2318] text-[9px] text-[#3d3428] hover:text-[#c8a84e] hover:bg-[#1c1810] transition cursor-pointer"
+              >
+                <UserPlus size={10} />
+                <span>추가 ({agents.length}/25)</span>
+              </button>
+            )}
           </div>
 
           {/* Center: portrait */}
@@ -207,7 +257,7 @@ export default function SetupScreen({ onStart }: Props) {
               {/* Portrait */}
               <div className="w-[100px] h-[100px] bg-[#12100c] border border-[#2a2318] rounded flex items-center justify-center mb-3 relative">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#12100c]/40 rounded" />
-                <Image src={profile.profile} alt="" width={64} height={64} className="relative z-10" style={{ imageRendering: "pixelated" }} />
+                <Image src={selected.profile} alt="" width={64} height={64} className="relative z-10" style={{ imageRendering: "pixelated" }} />
               </div>
 
               {/* Nav */}
@@ -219,19 +269,27 @@ export default function SetupScreen({ onStart }: Props) {
                 <button onClick={() => nav(1)} disabled={selectedIdx === agents.length - 1} className="text-[#3d3428] hover:text-[#c8a84e] disabled:opacity-15 cursor-pointer transition"><ChevronRight size={13} /></button>
               </div>
 
-              <p className="text-[9px] text-[#5a5040] text-center leading-[1.5] max-w-[180px]">{profile.description}</p>
+              <p className="text-[9px] text-[#5a5040] text-center leading-[1.5] max-w-[180px]">{selected.description}</p>
             </div>
 
-            {/* Traits */}
+            {/* Traits + Delete */}
             <div className="px-3 pb-3">
               <Hdr title="특징" icon={Shield} />
-              <div className="space-y-[3px]">
-                {profile.traits.map((t) => (
+              <div className="space-y-[3px] mb-2">
+                {selected.traits.map((t) => (
                   <div key={t} className="bg-[#2a2318] border border-[#3d3428]/25 rounded-[3px] px-2 py-[5px] text-center">
                     <span className="text-[10px] text-[#b8a880]">{t}</span>
                   </div>
                 ))}
               </div>
+              {agents.length > 2 && (
+                <button
+                  onClick={() => removeAgent(selectedIdx)}
+                  className="w-full flex items-center justify-center gap-1 py-[5px] rounded-[3px] border border-[#C85A4A]/20 text-[9px] text-[#C85A4A]/60 hover:text-[#C85A4A] hover:bg-[#C85A4A]/5 transition cursor-pointer"
+                >
+                  <Trash2 size={10} />삭제
+                </button>
+              )}
             </div>
           </div>
 

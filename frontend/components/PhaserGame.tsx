@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useImperativeHandle, ForwardedRef } from "react";
 import Phaser from "phaser";
 import { Agent } from "@/mock_data/agents";
+import { AquariumMapHandle } from "./AquariumMap";
 
 interface Props {
   agents: Agent[];
   onSelectAgent: (a: Agent) => void;
+  mapRef?: ForwardedRef<AquariumMapHandle>;
 }
 
 const SPAWN_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -15,15 +17,41 @@ const SPAWN_POSITIONS: Record<string, { x: number; y: number }> = {
   value:      { x: 576,  y: 800 },
   quant:      { x: 2240, y: 1920 },
   whale:      { x: 2560, y: 1600 },
-  news:       { x: 1440, y: 1280 },
   contrarian: { x: 640,  y: 1920 },
 };
 
+const FALLBACK_SPAWNS = [
+  { x: 1440, y: 1280 }, { x: 800,  y: 1400 }, { x: 1800, y: 800 },
+  { x: 1100, y: 2000 }, { x: 2000, y: 1200 }, { x: 700,  y: 1700 },
+  { x: 1600, y: 1600 }, { x: 2200, y: 800 },  { x: 960,  y: 960 },
+  { x: 1900, y: 1900 }, { x: 500,  y: 1200 }, { x: 2600, y: 1000 },
+  { x: 1200, y: 600 },  { x: 1700, y: 2100 }, { x: 2100, y: 1500 },
+  { x: 400,  y: 1600 }, { x: 1500, y: 1000 }, { x: 2300, y: 1800 },
+  { x: 850,  y: 2100 },
+];
+
 const WANDER_RADIUS = 96;
 
-export default function PhaserGame({ agents, onSelectAgent }: Props) {
+export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
+
+  useImperativeHandle(mapRef, () => ({
+    zoomIn: () => {
+      const scene = gameRef.current?.scene.scenes[0];
+      if (scene) {
+        const cam = scene.cameras.main;
+        cam.setZoom(Phaser.Math.Clamp(cam.zoom + 0.15, 0.3, 3));
+      }
+    },
+    zoomOut: () => {
+      const scene = gameRef.current?.scene.scenes[0];
+      if (scene) {
+        const cam = scene.cameras.main;
+        cam.setZoom(Phaser.Math.Clamp(cam.zoom - 0.15, 0.3, 3));
+      }
+    },
+  }));
   const onSelectAgentRef = useRef(onSelectAgent);
   onSelectAgentRef.current = onSelectAgent;
   const agentsRef = useRef(agents);
@@ -137,8 +165,13 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
 
         // Place agents
         const currentAgents = agentsRef.current;
+        let fallbackIdx = 0;
         for (const agent of currentAgents) {
-          const pos = SPAWN_POSITIONS[agent.id] || { x: 1500, y: 1500 };
+          let pos = SPAWN_POSITIONS[agent.id];
+          if (!pos) {
+            pos = FALLBACK_SPAWNS[fallbackIdx % FALLBACK_SPAWNS.length];
+            fallbackIdx++;
+          }
           const sprite = this.physics.add.sprite(pos.x, pos.y, "atlas", "misa-front");
           sprite.setScale(1.5);
           sprite.setInteractive({ useHandCursor: true });
@@ -146,22 +179,25 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
             onSelectAgentRef.current(agent);
           });
 
-          // Speech bubble
+          // Name label - larger and more visible
           const bubbleBg = this.add.graphics();
           const text = this.add.text(0, 0, agent.alias, {
-            fontSize: "11px",
+            fontSize: "13px",
+            fontStyle: "bold",
             color: "#ffffff",
-            fontFamily: "sans-serif",
-            padding: { x: 6, y: 3 },
+            fontFamily: "Pretendard, sans-serif",
+            padding: { x: 8, y: 4 },
           });
           text.setOrigin(0.5);
 
-          const w = text.width + 16;
-          const h = text.height + 8;
-          bubbleBg.fillStyle(0x000000, 0.7);
-          bubbleBg.fillRoundedRect(-w / 2, -h / 2, w, h, 6);
+          const w = text.width + 20;
+          const h = text.height + 10;
+          bubbleBg.fillStyle(0x000000, 0.75);
+          bubbleBg.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
+          bubbleBg.lineStyle(1, 0xc8a84e, 0.4);
+          bubbleBg.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
 
-          const bubbleContainer = this.add.container(pos.x, pos.y - 36, [bubbleBg, text]);
+          const bubbleContainer = this.add.container(pos.x, pos.y - 40, [bubbleBg, text]);
           bubbleContainer.setDepth(100);
 
           const homeX = pos.x;
@@ -175,7 +211,7 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
         // Camera
         this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
         this.cameras.main.centerOn(1500, 1500);
-        this.cameras.main.setZoom(0.8);
+        this.cameras.main.setZoom(0.6);
 
         this.cursors = this.input.keyboard!.createCursorKeys();
 

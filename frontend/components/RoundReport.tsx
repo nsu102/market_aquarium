@@ -1,15 +1,14 @@
 "use client";
 
-import { useState } from "react";
 import { RoundReport as RoundReportType } from "@/mock_data/rounds";
 import { GameEvent } from "@/mock_data/events";
 import {
-  ChevronUp,
-  ChevronDown,
   TrendingUp,
   TrendingDown,
   Zap,
   Users,
+  X,
+  FileText,
 } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
 
@@ -22,116 +21,126 @@ function formatKRW(n: number) {
 export default function RoundReport({
   report,
   events,
+  onClose,
 }: {
   report: RoundReportType;
   events: GameEvent[];
+  onClose: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   return (
-    <div
-      className={`bg-surface-card border-t border-border transition-all duration-300 flex-shrink-0 ${
-        expanded ? "h-56" : "h-11"
-      }`}
-    >
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full h-11 flex items-center px-5 gap-3 hover:bg-surface-secondary/50 transition cursor-pointer"
-      >
-        <span className="text-[11px] text-text-secondary flex items-center gap-1.5 font-medium">
-          <Zap size={12} className="text-accent-gold" />
-          라운드 {report.round} 리포트
-        </span>
-        <span className="text-[11px] text-text-tertiary flex-1 truncate text-left">
-          {report.summary}
-        </span>
-        {expanded ? (
-          <ChevronDown size={14} className="text-text-tertiary" />
-        ) : (
-          <ChevronUp size={14} className="text-text-tertiary" />
-        )}
-      </button>
+    <>
+      <div className="absolute inset-0 z-40 bg-black/30" onClick={onClose} />
+      <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+        <div className="pointer-events-auto w-[640px] max-w-[90vw] max-h-[80vh] bg-surface-card border border-border-light rounded-2xl shadow-[0_12px_60px_rgba(0,0,0,0.25)] overflow-hidden flex flex-col animate-slide-up">
 
-      {expanded && (
-        <div className="px-5 pb-3 flex gap-8 overflow-x-auto text-[11px]">
-          {/* Price changes */}
-          <div className="min-w-[180px]">
-            <div className="text-text-tertiary mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[10px] font-semibold">
-              <TrendingUp size={11} className="text-accent-blue" />
-              시세 변동
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-light flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <FileText size={15} className="text-accent-gold" />
+              <span className="text-[13px] font-bold text-text-primary">
+                라운드 {report.round} 리포트
+              </span>
             </div>
-            {report.priceChanges.map((p) => {
-              const diff = p.after - p.before;
-              const isUp = diff >= 0;
-              return (
-                <div
-                  key={p.asset}
-                  className="flex items-center gap-2 text-text-secondary py-1"
-                >
-                  <span className="font-semibold text-text-primary w-8">
-                    {p.asset}
-                  </span>
-                  <span className="font-mono">
-                    {formatKRW(p.before)} → {formatKRW(p.after)}
-                  </span>
-                  <span
-                    className="font-mono flex items-center gap-0.5 font-medium"
-                    style={{ color: isUp ? "#5B8C3E" : "#C85A4A" }}
-                  >
-                    {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                    {isUp ? "+" : ""}
-                    {((diff / p.before) * 100).toFixed(1)}%
-                  </span>
-                </div>
-              );
-            })}
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-secondary transition cursor-pointer"
+            >
+              <X size={15} />
+            </button>
           </div>
 
-          {/* Agent actions */}
-          <div className="min-w-[200px]">
-            <div className="text-text-tertiary mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[10px] font-semibold">
-              <Users size={11} className="text-accent-green" />
-              에이전트 행동
-            </div>
-            {report.agentActions.map((a, i) => {
-              const Icon = AGENT_ICONS[a.agentAlias] || AGENT_ICONS.default;
-              return (
-                <div
-                  key={i}
-                  className="text-text-secondary flex items-center gap-1.5 py-1"
-                >
-                  <Icon size={12} className="text-text-tertiary" />
-                  <span className="text-text-primary font-medium">{a.agentAlias}:</span>
-                  <span>{a.action}</span>
-                </div>
-              );
-            })}
+          {/* Summary */}
+          <div className="px-5 py-3 bg-surface-secondary/40 border-b border-border-light">
+            <p className="text-[12px] text-text-secondary leading-relaxed">{report.summary}</p>
           </div>
 
-          {/* Events */}
-          <div className="min-w-[220px]">
-            <div className="text-text-tertiary mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[10px] font-semibold">
-              <Zap size={11} className="text-accent-gold" />
-              주요 이벤트
-            </div>
-            <div className="text-accent-orange font-semibold mb-1.5">
-              {report.keyEvent}
-            </div>
-            {events.map((e) => (
-              <div key={e.id} className="text-text-tertiary py-0.5">
-                <span
-                  className={`text-[10px] font-mono mr-1.5 font-semibold ${
-                    e.source === "user" ? "text-accent-blue" : "text-text-tertiary"
-                  }`}
-                >
-                  [{e.source === "user" ? "USER" : "SYS"}]
-                </span>
-                <span className="text-text-secondary">{e.text}</span>
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+              {/* Price changes */}
+              <div>
+                <div className="text-text-tertiary mb-3 flex items-center gap-1.5 uppercase tracking-wider text-[10px] font-semibold">
+                  <TrendingUp size={11} className="text-accent-blue" />
+                  시세 변동
+                </div>
+                <div className="space-y-1.5">
+                  {report.priceChanges.map((p) => {
+                    const diff = p.after - p.before;
+                    const isUp = diff >= 0;
+                    return (
+                      <div key={p.asset} className="bg-surface-secondary border border-border-light rounded-xl p-2.5">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[12px] font-semibold text-text-primary">{p.asset}</span>
+                          <span
+                            className="text-[11px] font-mono font-semibold flex items-center gap-0.5"
+                            style={{ color: isUp ? "#5B8C3E" : "#C85A4A" }}
+                          >
+                            {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                            {isUp ? "+" : ""}{((diff / p.before) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-text-tertiary">
+                          {formatKRW(p.before)} → {formatKRW(p.after)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            ))}
+
+              {/* Agent actions */}
+              <div>
+                <div className="text-text-tertiary mb-3 flex items-center gap-1.5 uppercase tracking-wider text-[10px] font-semibold">
+                  <Users size={11} className="text-accent-green" />
+                  에이전트 행동
+                </div>
+                <div className="space-y-1">
+                  {report.agentActions.map((a, i) => {
+                    const Icon = AGENT_ICONS[a.agentAlias] || AGENT_ICONS.default;
+                    return (
+                      <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-surface-secondary/50 transition">
+                        <div className="w-6 h-6 rounded-full bg-surface-secondary flex items-center justify-center flex-shrink-0">
+                          <Icon size={12} className="text-text-tertiary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[11px] text-text-primary font-medium">{a.agentAlias}</span>
+                          <span className="text-[11px] text-text-tertiary ml-1.5">{a.action}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Events */}
+              <div>
+                <div className="text-text-tertiary mb-3 flex items-center gap-1.5 uppercase tracking-wider text-[10px] font-semibold">
+                  <Zap size={11} className="text-accent-gold" />
+                  주요 이벤트
+                </div>
+                <div className="bg-accent-gold/5 border border-accent-gold/15 rounded-xl p-2.5 mb-2">
+                  <p className="text-[11px] text-accent-gold font-semibold">{report.keyEvent}</p>
+                </div>
+                <div className="space-y-1">
+                  {events.map((e) => (
+                    <div key={e.id} className="text-[11px] py-1">
+                      <span
+                        className={`font-mono mr-1.5 font-semibold ${
+                          e.source === "user" ? "text-accent-blue" : "text-text-tertiary"
+                        }`}
+                      >
+                        [{e.source === "user" ? "USER" : "SYS"}]
+                      </span>
+                      <span className="text-text-secondary">{e.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }

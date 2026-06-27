@@ -11,6 +11,9 @@ import {
   Send,
   Zap,
   X,
+  ZoomIn,
+  ZoomOut,
+  FileText,
 } from "lucide-react";
 
 interface Props {
@@ -23,8 +26,12 @@ interface Props {
   boardOpen: boolean;
   onToggleMarket: () => void;
   onToggleBoard: () => void;
+  onToggleReport: () => void;
+  reportOpen: boolean;
   marketNotifications: number;
   boardNotifications: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
 }
 
 function Badge({ count }: { count: number }) {
@@ -47,8 +54,12 @@ export default function GameHUD({
   boardOpen,
   onToggleMarket,
   onToggleBoard,
+  onToggleReport,
+  reportOpen,
   marketNotifications,
   boardNotifications,
+  onZoomIn,
+  onZoomOut,
 }: Props) {
   const [eventOpen, setEventOpen] = useState(false);
   const [eventText, setEventText] = useState("");
@@ -63,86 +74,97 @@ export default function GameHUD({
   return (
     <>
       {/* ── Top-left: Logo ── */}
-      <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
-        <div className="flex items-center gap-2 bg-surface-card/90 backdrop-blur-md border border-border-light rounded-xl px-3 py-2 shadow-soft">
+      <div className="absolute top-4 left-4 z-40">
+        <div className="flex items-center gap-2 bg-surface-card border border-border-light rounded-xl px-3 py-2 shadow-soft">
           <Fish size={18} className="text-accent-blue" />
           <span className="text-sm font-bold text-text-primary tracking-wide">MARKET AQUARIUM</span>
         </div>
       </div>
 
-      {/* ── Top-right: Toggle buttons ── */}
-      <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
-        {/* Market panel toggle */}
-        <button
-          onClick={onToggleMarket}
-          className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition cursor-pointer shadow-soft border ${
-            marketOpen
-              ? "bg-accent-green/15 border-accent-green/30 text-accent-green"
-              : "bg-surface-card/90 backdrop-blur-md border-border-light text-text-secondary hover:text-accent-green hover:border-accent-green/20"
-          }`}
-          title="시장 패널"
-        >
-          <BarChart3 size={18} />
-          {!marketOpen && <Badge count={marketNotifications} />}
-        </button>
+      {/* ── Bottom-center: Toolbar ── */}
+      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40">
+        <div className="flex items-center gap-1 bg-surface-card border border-border-light rounded-2xl px-2 py-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.18)]">
 
-        {/* Board feed toggle */}
-        <button
-          onClick={onToggleBoard}
-          className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition cursor-pointer shadow-soft border ${
-            boardOpen
-              ? "bg-accent-blue/15 border-accent-blue/30 text-accent-blue"
-              : "bg-surface-card/90 backdrop-blur-md border-border-light text-text-secondary hover:text-accent-blue hover:border-accent-blue/20"
-          }`}
-          title="게시판"
-        >
-          <MessageSquare size={18} />
-          {!boardOpen && <Badge count={boardNotifications} />}
-        </button>
-      </div>
+          {/* Market toggle */}
+          <ToolbarBtn
+            onClick={onToggleMarket}
+            active={marketOpen}
+            icon={BarChart3}
+            label="시장"
+            activeColor="accent-green"
+            badge={!marketOpen ? marketNotifications : 0}
+          />
 
-      {/* ── Top-center: Round controls ── */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
-        <div className="flex items-center gap-1.5 bg-surface-card/90 backdrop-blur-md border border-border-light rounded-xl px-3 py-1.5 shadow-soft">
-          <span className="text-[11px] text-text-tertiary font-medium tracking-wider">Round</span>
-          <span className="text-accent-green font-mono font-bold text-sm">{round}</span>
-          <div className="w-px h-4 bg-border-light mx-1" />
-          <button
-            onClick={onTogglePlay}
-            className={`w-7 h-7 rounded-lg flex items-center justify-center transition cursor-pointer ${
-              playing
-                ? "bg-accent-red/10 text-accent-red hover:bg-accent-red/20"
-                : "bg-accent-green/10 text-accent-green hover:bg-accent-green/20"
-            }`}
-          >
-            {playing ? <Pause size={14} /> : <Play size={14} />}
+          {/* Board toggle */}
+          <ToolbarBtn
+            onClick={onToggleBoard}
+            active={boardOpen}
+            icon={MessageSquare}
+            label="게시판"
+            activeColor="accent-blue"
+            badge={!boardOpen ? boardNotifications : 0}
+          />
+
+          {/* Report */}
+          <ToolbarBtn
+            onClick={onToggleReport}
+            active={reportOpen}
+            icon={FileText}
+            label="리포트"
+            activeColor="accent-gold"
+          />
+
+          <div className="w-px h-7 bg-border-light mx-1" />
+
+          {/* Round controls */}
+          <div className="flex items-center gap-1 px-1">
+            <span className="text-[10px] text-text-tertiary font-medium mr-0.5">R</span>
+            <span className="text-accent-green font-mono font-bold text-sm min-w-[16px] text-center">{round}</span>
+            <button
+              onClick={onTogglePlay}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                playing
+                  ? "bg-accent-red/10 text-accent-red hover:bg-accent-red/20"
+                  : "bg-accent-green/10 text-accent-green hover:bg-accent-green/20"
+              }`}
+            >
+              {playing ? <Pause size={14} /> : <Play size={14} />}
+            </button>
+            <button
+              onClick={onNextRound}
+              className="w-8 h-8 rounded-lg bg-surface-tertiary/60 text-text-secondary flex items-center justify-center hover:bg-accent-blue/10 hover:text-accent-blue transition cursor-pointer"
+            >
+              <SkipForward size={14} />
+            </button>
+          </div>
+
+          <div className="w-px h-7 bg-border-light mx-1" />
+
+          {/* Zoom */}
+          <button onClick={onZoomOut} className="w-8 h-8 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-secondary transition cursor-pointer flex items-center justify-center">
+            <ZoomOut size={15} />
           </button>
-          <button
-            onClick={onNextRound}
-            className="w-7 h-7 rounded-lg bg-surface-tertiary text-text-secondary flex items-center justify-center hover:bg-accent-blue/10 hover:text-accent-blue transition cursor-pointer"
-          >
-            <SkipForward size={14} />
+          <button onClick={onZoomIn} className="w-8 h-8 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-secondary transition cursor-pointer flex items-center justify-center">
+            <ZoomIn size={15} />
           </button>
-        </div>
-      </div>
 
-      {/* ── Bottom-center: Event input trigger ── */}
-      {!eventOpen && (
-        <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-40">
+          <div className="w-px h-7 bg-border-light mx-1" />
+
+          {/* Event trigger */}
           <button
             onClick={() => setEventOpen(true)}
-            className="flex items-center gap-2 bg-surface-card/90 backdrop-blur-md border border-border-light rounded-xl px-4 py-2.5 shadow-soft hover:border-accent-gold/30 hover:shadow-md transition cursor-pointer group"
+            className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-accent-gold hover:bg-accent-gold/10 transition cursor-pointer"
           >
-            <Zap size={15} className="text-accent-gold group-hover:scale-110 transition-transform" />
-            <span className="text-[12px] text-text-secondary font-medium">이벤트 입력</span>
+            <Zap size={14} />
+            <span className="text-[11px] font-semibold">이벤트</span>
           </button>
         </div>
-      )}
+      </div>
 
-      {/* ── Bottom-center: Event input expanded ── */}
+      {/* ── Event input overlay ── */}
       {eventOpen && (
-        <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-40 w-[520px] max-w-[90vw] animate-slide-up">
-          <div className="bg-surface-card/95 backdrop-blur-md border border-border-light rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] p-3">
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 w-[520px] max-w-[90vw] animate-slide-up">
+          <div className="bg-surface-card border border-border-light rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] p-3">
             <div className="flex items-center gap-2 mb-2">
               <Zap size={14} className="text-accent-gold" />
               <span className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wider">Global Event</span>
@@ -176,5 +198,42 @@ export default function GameHUD({
         </div>
       )}
     </>
+  );
+}
+
+const ACTIVE_STYLES: Record<string, string> = {
+  "accent-green": "bg-accent-green/12 text-accent-green border border-accent-green/25",
+  "accent-blue": "bg-accent-blue/12 text-accent-blue border border-accent-blue/25",
+  "accent-gold": "bg-accent-gold/12 text-accent-gold border border-accent-gold/25",
+};
+
+function ToolbarBtn({
+  onClick,
+  active,
+  icon: Icon,
+  label,
+  activeColor,
+  badge = 0,
+}: {
+  onClick: () => void;
+  active: boolean;
+  icon: React.ComponentType<any>;
+  label: string;
+  activeColor: string;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative flex items-center gap-1.5 px-2.5 h-8 rounded-lg transition cursor-pointer text-[11px] font-medium ${
+        active
+          ? ACTIVE_STYLES[activeColor] || ""
+          : "text-text-tertiary hover:text-text-secondary hover:bg-surface-secondary border border-transparent"
+      }`}
+    >
+      <Icon size={14} />
+      <span className="hidden sm:inline">{label}</span>
+      {badge > 0 && <Badge count={badge} />}
+    </button>
   );
 }
