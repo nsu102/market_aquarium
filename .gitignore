@@ -101,3 +101,5 @@ ENV/
 # Rope project settings
 .ropeproject
 .next
+
+frontend/node_modules/*

@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+body {
+  background: #FAF6EE;
+  color: #3D3529;
+  font-family: 'Pretendard', -apple-system, sans-serif;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D4C9B5; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #BFB49E; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes bubble-pop {
+  0% { opacity: 0; transform: scale(0.9) translateY(4px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@keyframes slide-up {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-bubble { animation: bubble-pop 0.3s ease-out; }
+.animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+.animate-slide-up { animation: slide-up 0.25s ease-out; }
+
+/* Setup screen background */
+.setup-bg {
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(42, 35, 24, 0.4) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 30%, rgba(60, 48, 28, 0.3) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(30, 26, 18, 0.5) 0%, transparent 60%),
+    linear-gradient(160deg, #1a1612 0%, #201c14 30%, #16130f 60%, #1e1a14 100%);
+}
+.setup-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(200, 168, 78, 0.015) 2px, rgba(200, 168, 78, 0.015) 4px),
+    repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(200, 168, 78, 0.015) 2px, rgba(200, 168, 78, 0.015) 4px);
+  pointer-events: none;
+}
+
+.setup-bg .setup-scrollbar::-webkit-scrollbar-track { background: #15120f; }
+.setup-bg .setup-scrollbar::-webkit-scrollbar-thumb { background: #3d3428; }
