@@ -55,8 +55,25 @@ export interface RoundReportData {
   price_breakdowns: PriceBreakdown[];
 }
 
+export type TradeAction = "BUY" | "SELL" | "HOLD" | "BUY_LARGE";
+
+/**
+ * Per-agent summary of what each agent did this round. Drives the map movement
+ * choreography (walk to board if posted, walk to exchange if traded).
+ */
+export interface RoundAction {
+  agent_id: string;
+  alias: string;
+  posted: boolean;
+  post_text: string | null;
+  trade_action: TradeAction;
+  trade_symbol: string | null;
+  traded: boolean;
+}
+
 export interface EventResponse extends GameState {
   round_report: RoundReportData;
+  round_actions: RoundAction[];
 }
 
 export interface Achievement {

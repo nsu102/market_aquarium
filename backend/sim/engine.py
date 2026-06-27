@@ -89,6 +89,7 @@ class GameSession:
         self.events: list[Event] = []
         self.round: int = 0
         self.round_reports: list[RoundReport] = []
+        self.last_round_actions: list[dict] = []
         self.market: MarketData = market_state.compute_market_data(self.agents, self.assets)
         # snapshot for end-of-game achievements (best performer)
         self._initial_state = {
@@ -182,6 +183,23 @@ class GameSession:
         )
         rr = report.build_round_report(rnd, self.market, breakdowns, self.agents, trades)
         self.round_reports.append(rr)
+
+        # Per-agent round summary so the frontend can choreograph movement:
+        # who walked to the board (and what they posted) and to the exchange
+        # (and how they traded) this round.
+        self.last_round_actions = []
+        for ag in self.agents:
+            my_posts = [p for p in self.posts if p.round == rnd and p.agentId == ag.id]
+            tr = next((t for t in trades if t.agent_id == ag.id), None)
+            self.last_round_actions.append({
+                "agent_id": ag.id,
+                "alias": ag.alias,
+                "posted": bool(my_posts),
+                "post_text": my_posts[-1].content if my_posts else None,
+                "trade_action": tr.action.value if tr else "HOLD",
+                "trade_symbol": tr.symbol if tr else None,
+                "traded": bool(tr and tr.action.value != "HOLD"),
+            })
         return rr
 
     # ------------------------------------------------------------------ #

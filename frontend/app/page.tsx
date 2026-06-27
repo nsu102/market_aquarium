@@ -42,10 +42,10 @@ type Connection = "mock" | "backend" | "canonical";
 
 // Canonical mode fork + how many steps to queue up front.
 const FORK_SIM_CODE = "base_the_ville_market6";
-// One in-game day = 1200 render ticks (sec_per_step=72). We run one day per
-// user event so the round is event-driven: nothing advances until you send an
-// event, then that day plays out.
-const STEPS_PER_DAY = 1200;
+// Run the live sim continuously so the map renders agents living their day
+// (reverie is a continuous-time model). The user's event is the market shock
+// injected on top; agents react to it via emotion/posts/trades. 6000 ticks ~5 days.
+const CANONICAL_RUN_STEPS = 6000;
 
 /** Normalize the control server's event impact into the overlay's enum. */
 function normalizeImpact(
@@ -131,20 +131,15 @@ export default function Home() {
     (setupAgents: Agent[]) => {
       const sim = `market_${Date.now()}`;
       setConnection("canonical");
-      // Fork only -- do NOT run yet. The sim stays paused until the user sends
-      // the round's event (handleEvent then injects it and runs that day).
+      // Fork + run so the map renders immediately (agents live their day). The
+      // server auto-drops any prior sim, so restarting from setup just works.
       control
         .start(FORK_SIM_CODE, sim)
+        .then(() => control.run(CANONICAL_RUN_STEPS))
         .then(() => {
           setCanonicalSim(sim);
         })
         .catch((err) => {
-          // "already loaded" just means a prior start (e.g. React strict-mode
-          // double-invoke) succeeded -- treat as success, stay canonical.
-          if (String(err?.message || err).includes("already loaded")) {
-            setCanonicalSim(sim);
-            return;
-          }
           console.warn(
             "[MarketAquarium] canonical start failed, falling back to standalone:",
             err
@@ -219,8 +214,9 @@ export default function Home() {
       // Canonical: inject the round event via the control server. Market/posts
       // updates then flow back through handleTick on the next movement update.
       if (connection === "canonical") {
-        // Inject the round's event, THEN run that in-game day so the shock plays
-        // out (event-driven: the sim only advances after you send an event).
+        // The sim is already running; just inject the shock. Agents pick it up
+        // on their next board visit (view_sns) and trade, and the day's price
+        // distortion reflects it at the day boundary.
         control
           .marketEvent({ text, is_rumor: false })
           .then((res) => {
@@ -228,10 +224,6 @@ export default function Home() {
               text,
               impact: normalizeImpact(res.impact),
               source: "user",
-            });
-            return control.run(STEPS_PER_DAY).catch((e) => {
-              // a run may already be in progress from the previous day; ignore.
-              console.warn("[MarketAquarium] run (already running?):", e);
             });
           })
           .catch((err) => {
@@ -250,6 +242,11 @@ export default function Home() {
         .then((res) => {
           applyGameState(res);
           setRoundReport(res.round_report);
+          // Choreograph the map: agents walk to the board / exchange and back
+          // based on what they actually did this round. No-op in the mock path.
+          if (res.round_actions?.length) {
+            mapRef.current?.playRound(res.round_actions);
+          }
           // Drive the event overlay from the freshly returned event's impact.
           const justFired =
             res.events.find((e) => e.text === text) ?? res.events[0];

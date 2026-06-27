@@ -4,11 +4,32 @@ import { useEffect, useRef, useImperativeHandle, ForwardedRef } from "react";
 import Phaser from "phaser";
 import { Agent } from "@/mock_data/agents";
 import { AquariumMapHandle } from "./AquariumMap";
+import { RoundAction } from "@/lib/api";
+import { zonePixel, TILE_SIZE } from "@/constants/mapZones";
 
 interface Props {
   agents: Agent[];
   onSelectAgent: (a: Agent) => void;
   mapRef?: ForwardedRef<AquariumMapHandle>;
+}
+
+/** A single step in an agent's round routine. */
+interface Waypoint {
+  x: number;
+  y: number;
+  /** How long to pause on arrival (ms, sim time). */
+  hold: number;
+  onArrive?: () => void;
+  arrived?: boolean;
+}
+
+/** Phaser scene shape exposing the round choreography to the React handle. */
+interface RoundScene extends Phaser.Scene {
+  playRound?: (actions: RoundAction[]) => void;
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
 const SPAWN_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -59,6 +80,10 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
         scene.anims.globalTimeScale = speed;
       }
     },
+    playRound: (actions: RoundAction[]) => {
+      const scene = gameRef.current?.scene.scenes[0] as RoundScene | undefined;
+      scene?.playRound?.(actions);
+    },
   }));
   const onSelectAgentRef = useRef(onSelectAgent);
   onSelectAgentRef.current = onSelectAgent;
@@ -72,7 +97,21 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
 
     class MainScene extends Phaser.Scene {
       cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-      agentSprites: { sprite: Phaser.GameObjects.Sprite; bubble: Phaser.GameObjects.Container; agent: Agent; homeX: number; homeY: number; targetX: number; targetY: number }[] = [];
+      agentSprites: {
+        sprite: Phaser.GameObjects.Sprite;
+        bubble: Phaser.GameObjects.Container;
+        agent: Agent;
+        homeX: number;
+        homeY: number;
+        targetX: number;
+        targetY: number;
+        // Round-routine state (null when idle-wandering).
+        script: Waypoint[] | null;
+        scriptIdx: number;
+        scriptDelay: number;
+        holdUntil: number;
+        actionBubble: Phaser.GameObjects.Container | null;
+      }[] = [];
 
       constructor() {
         super("MainScene");
@@ -225,7 +264,20 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
           const targetX = homeX + (Math.random() - 0.5) * WANDER_RADIUS * 2;
           const targetY = homeY + (Math.random() - 0.5) * WANDER_RADIUS * 2;
 
-          this.agentSprites.push({ sprite, bubble: bubbleContainer, agent, homeX, homeY, targetX, targetY });
+          this.agentSprites.push({
+            sprite,
+            bubble: bubbleContainer,
+            agent,
+            homeX,
+            homeY,
+            targetX,
+            targetY,
+            script: null,
+            scriptIdx: 0,
+            scriptDelay: 0,
+            holdUntil: 0,
+            actionBubble: null,
+          });
         }
 
         // Camera
@@ -267,18 +319,183 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
         });
       }
 
+      /** Drive a directional walk animation toward (dx, dy). */
+      playWalk(a: typeof this.agentSprites[number], dx: number, dy: number) {
+        const id = a.agent.id;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          a.sprite.anims.play(dx < 0 ? `${id}-left-walk` : `${id}-right-walk`, true);
+        } else {
+          a.sprite.anims.play(dy < 0 ? `${id}-back-walk` : `${id}-front-walk`, true);
+        }
+      }
+
+      /** Show a transient label above an agent (post text / trade indicator). */
+      showActionBubble(a: typeof this.agentSprites[number], label: string, color: number) {
+        this.clearActionBubble(a);
+        const text = this.add.text(0, 0, label, {
+          fontSize: "12px",
+          fontStyle: "bold",
+          color: "#ffffff",
+          fontFamily: "Pretendard, sans-serif",
+          align: "center",
+          padding: { x: 8, y: 4 },
+          wordWrap: { width: 180 },
+        });
+        text.setOrigin(0.5);
+        const w = text.width + 18;
+        const h = text.height + 10;
+        const bg = this.add.graphics();
+        bg.fillStyle(color, 0.92);
+        bg.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
+        bg.lineStyle(1, 0xffffff, 0.35);
+        bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
+        const c = this.add.container(a.sprite.x, a.sprite.y - 62, [bg, text]);
+        c.setDepth(120);
+        a.actionBubble = c;
+      }
+
+      clearActionBubble(a: typeof this.agentSprites[number]) {
+        if (a.actionBubble) {
+          a.actionBubble.destroy();
+          a.actionBubble = null;
+        }
+      }
+
+      /**
+       * Choreograph one round. For each agent: walk to the board (if they
+       * posted), then to the exchange (if they traded), then back home and
+       * resume wandering. Robust: clean-restarts any in-flight round and
+       * skips agents that aren't on the map.
+       */
+      playRound(actions: RoundAction[]) {
+        const now = this.time.now;
+        const board = zonePixel("board");
+        const exchange = zonePixel("exchange");
+        // Center on the tile and fan agents out in a ring so they don't stack.
+        const cx = TILE_SIZE / 2;
+        const total = this.agentSprites.length || 1;
+
+        // Clean restart: drop any in-flight scripts + bubbles.
+        for (const a of this.agentSprites) {
+          a.script = null;
+          a.scriptIdx = 0;
+          this.clearActionBubble(a);
+        }
+
+        actions.forEach((action, i) => {
+          const a = this.agentSprites.find((s) => s.agent.id === action.agent_id);
+          if (!a) return; // agent not rendered on this map
+          if (!action.posted && !action.traded) return; // nothing to show
+
+          const ang = (i / total) * Math.PI * 2;
+          const offX = Math.cos(ang) * 56;
+          const offY = Math.sin(ang) * 56;
+
+          const script: Waypoint[] = [];
+
+          if (action.posted) {
+            script.push({
+              x: board.x + cx + offX,
+              y: board.y + cx + offY,
+              hold: 1600,
+              onArrive: () => {
+                const t = action.post_text?.trim();
+                this.showActionBubble(
+                  a,
+                  t && t.length ? truncate(t, 40) : "게시글 작성",
+                  0x6c8cff
+                );
+              },
+            });
+          }
+
+          if (action.traded) {
+            const isBuy =
+              action.trade_action === "BUY" || action.trade_action === "BUY_LARGE";
+            const label =
+              action.trade_symbol != null
+                ? `${action.trade_action} ${action.trade_symbol}`
+                : action.trade_action;
+            script.push({
+              x: exchange.x + cx + offX,
+              y: exchange.y + cx + offY,
+              hold: 1400,
+              onArrive: () => {
+                this.showActionBubble(a, label, isBuy ? 0x2fbf71 : 0xe5484d);
+              },
+            });
+          }
+
+          // Return home and resume idle wander.
+          script.push({
+            x: a.homeX,
+            y: a.homeY,
+            hold: 0,
+            onArrive: () => this.clearActionBubble(a),
+          });
+
+          a.script = script;
+          a.scriptIdx = 0;
+          a.holdUntil = 0;
+          a.scriptDelay = now + i * 180; // small stagger for readability
+        });
+      }
+
       update(_time: number, _delta: number) {
         const cam = this.cameras.main;
         const speed = 8;
+        const now = this.time.now;
 
         if (this.cursors.left.isDown) cam.scrollX -= speed;
         if (this.cursors.right.isDown) cam.scrollX += speed;
         if (this.cursors.up.isDown) cam.scrollY -= speed;
         if (this.cursors.down.isDown) cam.scrollY += speed;
 
-        // Idle wander for agents
         for (const a of this.agentSprites) {
           const body = a.sprite.body as Phaser.Physics.Arcade.Body;
+
+          if (a.script) {
+            // Scripted round routine.
+            if (now < a.scriptDelay) {
+              body.setVelocity(0, 0);
+            } else {
+              const wp = a.script[a.scriptIdx];
+              const dx = wp.x - a.sprite.x;
+              const dy = wp.y - a.sprite.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+
+              if (dist < 6) {
+                body.setVelocity(0, 0);
+                if (!wp.arrived) {
+                  wp.arrived = true;
+                  a.sprite.anims.stop();
+                  a.sprite.setFrame(0);
+                  wp.onArrive?.();
+                  a.holdUntil = now + wp.hold;
+                }
+                if (now >= a.holdUntil) {
+                  a.scriptIdx++;
+                  if (a.scriptIdx >= a.script.length) {
+                    // Routine finished -> resume wandering near home.
+                    a.script = null;
+                    a.scriptIdx = 0;
+                    a.targetX = a.homeX + (Math.random() - 0.5) * WANDER_RADIUS * 2;
+                    a.targetY = a.homeY + (Math.random() - 0.5) * WANDER_RADIUS * 2;
+                  }
+                }
+              } else {
+                const moveSpeed = 150; // faster than wander; zones are far away
+                body.setVelocity((dx / dist) * moveSpeed, (dy / dist) * moveSpeed);
+                this.playWalk(a, dx, dy);
+              }
+            }
+
+            a.bubble.setPosition(a.sprite.x, a.sprite.y - 36);
+            if (a.actionBubble) a.actionBubble.setPosition(a.sprite.x, a.sprite.y - 62);
+            continue;
+          }
+
+          // Idle wander (default between rounds).
           const dx = a.targetX - a.sprite.x;
           const dy = a.targetY - a.sprite.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -292,20 +509,13 @@ export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
             a.sprite.setFrame(0);
           } else {
             const moveSpeed = 30;
-            const vx = (dx / dist) * moveSpeed;
-            const vy = (dy / dist) * moveSpeed;
-            body.setVelocity(vx, vy);
-
-            const id = a.agent.id;
-            if (Math.abs(dx) > Math.abs(dy)) {
-              a.sprite.anims.play(dx < 0 ? `${id}-left-walk` : `${id}-right-walk`, true);
-            } else {
-              a.sprite.anims.play(dy < 0 ? `${id}-back-walk` : `${id}-front-walk`, true);
-            }
+            body.setVelocity((dx / dist) * moveSpeed, (dy / dist) * moveSpeed);
+            this.playWalk(a, dx, dy);
           }
 
           // Update bubble position
           a.bubble.setPosition(a.sprite.x, a.sprite.y - 36);
+          if (a.actionBubble) a.actionBubble.setPosition(a.sprite.x, a.sprite.y - 62);
         }
       }
     }

@@ -94,6 +94,7 @@ def submit_event(body: EventBody) -> dict:
     )
     out = s.state()
     out["round_report"] = rr.model_dump()
+    out["round_actions"] = s.last_round_actions  # per-agent: posted? traded? (for movement)
     return out
 
 

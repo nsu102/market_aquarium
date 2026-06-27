@@ -3,6 +3,7 @@
 import { forwardRef } from "react";
 import dynamic from "next/dynamic";
 import { Agent } from "@/mock_data/agents";
+import { RoundAction } from "@/lib/api";
 
 const PhaserGame = dynamic(() => import("./PhaserGame"), { ssr: false });
 
@@ -10,6 +11,8 @@ export interface AquariumMapHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   setSpeed: (speed: number) => void;
+  /** Choreograph the agents for one round: walk to board / exchange and back. */
+  playRound: (actions: RoundAction[]) => void;
 }
 
 const AquariumMap = forwardRef<AquariumMapHandle, { agents: Agent[]; onSelectAgent: (a: Agent) => void }>(
