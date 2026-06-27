@@ -166,7 +166,11 @@ def status():
 def start(body: StartBody):
   with LOCK:
     if STATE.rs is not None:
-      return _bad_request("a simulation is already loaded")
+      # Smooth re-run: drop the previous instance instead of erroring, so the
+      # user can restart from the setup screen without restarting the server.
+      # (Any prior run thread is a daemon waiting on env files that won't come;
+      # it stays idle and harmless.)
+      _drop_instance()
 
     # Friendly pre-checks: the underlying ReverieServer constructor copies the
     # fork folder to the target folder with shutil.copytree, which fails with a

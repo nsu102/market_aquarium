@@ -40,7 +40,10 @@ PERSONA_TO_CHARACTER = {
 
 SEC_PER_STEP = 72  # locked decision #6
 START_DATE = "February 13, 2023"
-CURR_TIME = "February 13, 2023, 00:00:00"  # day starts 00:00
+# Day starts at 00:00 (locked decision #6): 1 round = 1 calendar day, re-planning
+# only at midnight, schedule injection always future. The early sleep stretch is
+# meant to be fast-forwarded on screen, not avoided by shifting the start hour.
+CURR_TIME = "February 13, 2023, 00:00:00"
 
 
 def _latest_env_file(sim_dir: Path) -> Path:

@@ -164,19 +164,24 @@ def api_home():
   f_curr_sim_code = fpath("temp_storage", "curr_sim_code.json")
   f_curr_step = fpath("temp_storage", "curr_step.json")
 
-  if not check_if_file_exists(f_curr_step):
+  if not check_if_file_exists(f_curr_step) or not check_if_file_exists(f_curr_sim_code):
     return JSONResponse({"error": "backend_not_started"})
 
-  with open(f_curr_sim_code) as json_file:
-    sim_code = json.load(json_file)["sim_code"]
+  # A stale curr_sim_code may point at a sim folder that no longer exists; treat
+  # any load/listing failure as "not started yet" rather than a 500 (a 500 also
+  # drops CORS headers, which surfaces as a confusing CORS error in the browser).
+  try:
+    with open(f_curr_sim_code) as json_file:
+      sim_code = json.load(json_file)["sim_code"]
+    with open(f_curr_step) as json_file:
+      step = json.load(json_file)["step"]
 
-  with open(f_curr_step) as json_file:
-    step = json.load(json_file)["step"]
+    persona_names, persona_names_set = collect_personas(sim_code)
+    persona_init_pos = init_positions_from_environment(sim_code, persona_names_set)
+  except Exception:
+    return JSONResponse({"error": "backend_not_started"})
 
   os.remove(f_curr_step)
-
-  persona_names, persona_names_set = collect_personas(sim_code)
-  persona_init_pos = init_positions_from_environment(sim_code, persona_names_set)
 
   return JSONResponse({
       "sim_code": sim_code,

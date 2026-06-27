@@ -500,7 +500,11 @@ def _long_term_planning(persona, new_day):
   try:
     from persona.cognitive_modules.schedule_inject import inject_board_then_exchange
     import market_bridge
-    now_min = (int(wake_up_hour) + 1) * 60
+    # Inject at/after the later of "current time" and "an hour after waking", so
+    # the slots are always in the future regardless of the day's start hour.
+    ct = persona.scratch.curr_time
+    cur_min = (ct.hour * 60 + ct.minute) if ct else 0
+    now_min = max(cur_min, (int(wake_up_hour) + 1) * 60)
     persona.scratch.f_daily_schedule = inject_board_then_exchange(
         persona.scratch.f_daily_schedule, now_min,
         board_activity=market_bridge.BOARD_ACTIVITY, board_dur=120,
