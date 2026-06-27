@@ -491,8 +491,23 @@ def _long_term_planning(persona, new_day):
   # Based on the daily_req, we create an hourly schedule for the persona, 
   # which is a list of todo items with a time duration (in minutes) that 
   # add up to 24 hours.
-  persona.scratch.f_daily_schedule = generate_hourly_schedule(persona, 
+  persona.scratch.f_daily_schedule = generate_hourly_schedule(persona,
                                                               wake_up_hour)
+
+  # Market Aquarium: guarantee a board (SNS) visit BEFORE an exchange (trade)
+  # visit every day, preserving the 1440-minute invariant (PRD 3.2.1). Guarded
+  # so a normal reverie run (no market context) is unaffected.
+  try:
+    from persona.cognitive_modules.schedule_inject import inject_board_then_exchange
+    import market_bridge
+    now_min = (int(wake_up_hour) + 1) * 60
+    persona.scratch.f_daily_schedule = inject_board_then_exchange(
+        persona.scratch.f_daily_schedule, now_min,
+        board_activity=market_bridge.BOARD_ACTIVITY, board_dur=120,
+        exchange_activity=market_bridge.EXCHANGE_ACTIVITY, exchange_dur=120)
+  except Exception:
+    pass
+
   persona.scratch.f_daily_schedule_hourly_org = (persona.scratch
                                                    .f_daily_schedule[:])
 
@@ -622,13 +637,30 @@ def _determine_action(persona, maze):
   # Finding the target location of the action and creating action-related
   # variables.
   act_world = maze.access_tile(persona.scratch.curr_tile)["world"]
-  # act_sector = maze.access_tile(persona.scratch.curr_tile)["sector"]
-  act_sector = generate_action_sector(act_desp, persona, maze)
-  act_arena = generate_action_arena(act_desp, persona, maze, act_world, act_sector)
-  act_address = f"{act_world}:{act_sector}:{act_arena}"
-  act_game_object = generate_action_game_object(act_desp, act_address,
-                                                persona, maze)
-  new_address = f"{act_world}:{act_sector}:{act_arena}:{act_game_object}"
+  # Market Aquarium: force our injected board/exchange slots to their exact
+  # the_ville address so grounding does not depend on the LLM (works offline).
+  _forced = None
+  try:
+    import market_bridge
+    _forced = market_bridge.force_address(act_desp)
+  except Exception:
+    _forced = None
+  if _forced:
+    new_address = _forced
+    # derive the address parts from the forced address so downstream object
+    # action generation (act_game_object etc.) still has its inputs.
+    _parts = _forced.split(":")
+    act_sector = _parts[1] if len(_parts) > 1 else ""
+    act_arena = _parts[2] if len(_parts) > 2 else ""
+    act_game_object = _parts[3] if len(_parts) > 3 else act_arena
+  else:
+    # act_sector = maze.access_tile(persona.scratch.curr_tile)["sector"]
+    act_sector = generate_action_sector(act_desp, persona, maze)
+    act_arena = generate_action_arena(act_desp, persona, maze, act_world, act_sector)
+    act_address = f"{act_world}:{act_sector}:{act_arena}"
+    act_game_object = generate_action_game_object(act_desp, act_address,
+                                                  persona, maze)
+    new_address = f"{act_world}:{act_sector}:{act_arena}:{act_game_object}"
   act_pron = generate_action_pronunciatio(act_desp, persona)
   act_event = generate_action_event_triple(act_desp, persona)
   # Persona's actions also influence the object states. We set those up here. 

@@ -292,8 +292,18 @@ class ReverieServer:
     # <sim_folder> points to the current simulation folder.
     sim_folder = f"{fs_storage}/{self.sim_code}"
 
+    # Market Aquarium: initialise the market context (once) so arrivals at the
+    # board/exchange drive view_sns/trade. Guarded -> normal reverie unaffected.
+    try:
+      import market_bridge
+      if market_bridge.get_context() is None:
+        market_bridge.init_context(list(self.personas.keys()))
+    except Exception:
+      pass
+    last_day = self.curr_time.strftime('%A %B %d')
+
     # When a persona arrives at a game object, we give a unique event
-    # to that object. 
+    # to that object.
     # e.g., ('double studio[...]:bed', 'is', 'unmade', 'unmade')
     # Later on, before this cycle ends, we need to return that to its 
     # initial state, like this: 
@@ -368,28 +378,54 @@ class ReverieServer:
           # move. The movement for each of the personas comes in the form of
           # x y coordinates where the persona will move towards. e.g., (50, 34)
           # This is where the core brains of the personas are invoked. 
-          movements = {"persona": dict(), 
+          movements = {"persona": dict(),
                        "meta": dict()}
-          for persona_name, persona in self.personas.items(): 
-            # <next_tile> is a x,y coordinate. e.g., (58, 9)
-            # <pronunciatio> is an emoji. e.g., "\ud83d\udca4"
-            # <description> is a string description of the movement. e.g., 
-            #   writing her next novel (editing her novel) 
-            #   @ double studio:double studio:common room:sofa
-            next_tile, pronunciatio, description = persona.move(
-              self.maze, self.personas, self.personas_tile[persona_name], 
-              self.curr_time)
+          # Market Aquarium: run the 6 personas' cognition CONCURRENTLY so one
+          # "thinking wave" costs ~one LLM latency instead of N (PRD 1.6). move()
+          # writes only to its own persona state and reads the shared maze, so a
+          # thread pool is safe here; the shared maze WRITES happen above, in the
+          # sequential frontend-sync loop.
+          from concurrent.futures import ThreadPoolExecutor
+
+          def _do_move(item):
+            pn, p = item
+            return pn, p.move(self.maze, self.personas,
+                              self.personas_tile[pn], self.curr_time)
+
+          with ThreadPoolExecutor(max_workers=min(8, len(self.personas) or 1)) as _ex:
+            _results = list(_ex.map(_do_move, list(self.personas.items())))
+
+          for persona_name, (next_tile, pronunciatio, description) in _results:
             movements["persona"][persona_name] = {}
             movements["persona"][persona_name]["movement"] = next_tile
             movements["persona"][persona_name]["pronunciatio"] = pronunciatio
             movements["persona"][persona_name]["description"] = description
-            movements["persona"][persona_name]["chat"] = (persona
-                                                          .scratch.chat)
+            movements["persona"][persona_name]["chat"] = (
+                self.personas[persona_name].scratch.chat)
 
           # Include the meta information about the current stage in the 
           # movements dictionary. 
-          movements["meta"]["curr_time"] = (self.curr_time 
+          movements["meta"]["curr_time"] = (self.curr_time
                                              .strftime("%B %d, %Y, %H:%M:%S"))
+
+          # Market Aquarium: at a day rollover, finalise the round (price
+          # distortion + report); expose live market state to the frontend in
+          # every movement file's meta. Guarded -> normal reverie unaffected.
+          try:
+            import market_bridge
+            ctx = market_bridge.get_context()
+            if ctx is not None:
+              new_day_str = self.curr_time.strftime('%A %B %d')
+              if new_day_str != last_day:
+                if ctx.current_event is not None:
+                  ctx.end_round()
+                last_day = new_day_str
+              snap = ctx.snapshot()
+              movements["meta"]["market"] = snap["market"]
+              movements["meta"]["posts"] = snap["posts"]
+              movements["meta"]["round"] = snap["round"]
+          except Exception:
+            pass
 
           # We then write the personas' movements to a file that will be sent 
           # to the frontend server. 

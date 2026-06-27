@@ -148,9 +148,25 @@ def execute(persona, maze, personas, plan):
   # Setting up the next immediate step. We stay at our curr_tile if there is
   # no <planned_path> left, but otherwise, we go to the next tile in the path.
   ret = persona.scratch.curr_tile
-  if persona.scratch.planned_path: 
+  if persona.scratch.planned_path:
     ret = persona.scratch.planned_path[0]
     persona.scratch.planned_path = persona.scratch.planned_path[1:]
+
+  # Market Aquarium: on ARRIVAL (no path left) at the board/exchange, trigger the
+  # market action once. The MarketContext guards once-per-round, so re-calls
+  # while idle are no-ops. Guarded so normal reverie runs are unaffected.
+  if not persona.scratch.planned_path:
+    try:
+      import market_bridge
+      ctx = market_bridge.get_context()
+      if ctx is not None:
+        addr = persona.scratch.act_address or ""
+        if "Hobbs Cafe" in addr:
+          ctx.on_arrive_board(persona.scratch.name)
+        elif "Willows Market" in addr:
+          ctx.on_arrive_exchange(persona.scratch.name)
+    except Exception:
+      pass
 
   description = f"{persona.scratch.act_description}"
   description += f" @ {persona.scratch.act_address}"
