@@ -455,3 +455,55 @@ https://openrouter.ai/openai/gpt-5.4-mini
 에이전트 프롬프트 (모델 정의) - 윤수
 BM 설정 - 희경
 
+---
+
+# 종목 리스트업 (담당: 희경 / 브랜치 HG/listup)
+
+이 파트는 시뮬레이션의 **입력 데이터**만 만든다. 시뮬/FE/게시판/백엔드 로직은 다른 팀원 담당.
+"종목 분류 및 리스트업 + 업비트 api" = 8섹터 종목 유니버스 + 실제 업비트 초기가/한글명을
+FE/BE 가 그대로 import 하는 산출물로 제공한다.
+
+## 파이프라인 (2단계)
+
+1. **빌드타임 1회** — `python freeze_universe.py` → `universe.json`
+   - 큐레이션 시드(8섹터) ∩ 업비트 라이브 원화마켓 + 대체풀 refill → 코인게코 시총 1회 → cap-weight.
+   - 섹터 멤버십·가중치는 여기서 **frozen**. 런타임 재추출/재계산 금지.
+2. **셋업/빌드타임** — `python listup.py` → `default_assets.json`
+   - `universe.json`(읽기 전용) + 업비트 `/market/all`(한글명) + `/ticker`(초기가 1회) 결합.
+   - 검증된 `upbit_stream.py` 의 상수/로더를 import 해서 얹는다(새로 안 짬).
+
+## 산출물 계약 (`default_assets.json`)
+
+```
+{ generated_at, vs_currency, weighting, universe_generated_at, count,
+  sectors: [<sector>...],
+  assets: [{ symbol, name(한글), market, sector, weight, coingecko_id,
+             price, change24h(%), volume(24h 거래대금 KRW) }] }
+```
+
+FE 매핑 (BE 와 얼라인되면 mock 대체):
+- `frontend/constants/agentProfiles.ts` `DEFAULT_ASSETS = [{symbol,name,price}]`
+- `frontend/mock_data/market.ts` `Asset = {symbol,name,price,change24h,volume,priceHistory}`
+- 에이전트 포트폴리오는 `symbol` 로 종목 참조.
+
+BE/다른 모듈 import:
+```python
+from listup import get_assets          # 시세 포함 전체 리스트(파일 안 쓰고 반환)
+from listup import get_default_assets  # {symbol,name,price} 만
+```
+
+## 불변식 (지키지 않으면 깨짐)
+
+- `freeze_universe.py` = 빌드타임 1회 전용. 런타임 호출 금지.
+- `upbit_stream.py` = `universe.json` 읽기만. WS 구독메세지 3원소 배열 / 바이너리 `json.loads` /
+  `signed_change_rate` 는 비율(×100 = %) — 검증됨, 수정 금지.
+- MVP 범위: **initial price 는 실제 업비트(O)** / **실시간 가격 API 는 제외(X)**.
+  실시간 WS 스트림(`upbit_stream.py`)은 post-MVP 옵션으로만 유지.
+
+## 파일
+
+- `freeze_universe.py` — 유니버스 고정(빌드). `universe.json` 생성.
+- `listup.py` — 리스트업 인터페이스(셋업). `default_assets.json` 생성 + import 함수.
+- `upbit_stream.py` — REST 스냅샷 / 실시간 WS 스트림(post-MVP 옵션).
+- `universe.json`, `default_assets.json` — 산출 데이터(커밋됨).
+
