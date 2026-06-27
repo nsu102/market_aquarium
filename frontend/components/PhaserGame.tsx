@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useImperativeHandle, ForwardedRef } from "react";
 import Phaser from "phaser";
 import { Agent } from "@/mock_data/agents";
+import { AquariumMapHandle } from "./AquariumMap";
 
 interface Props {
   agents: Agent[];
   onSelectAgent: (a: Agent) => void;
+  mapRef?: ForwardedRef<AquariumMapHandle>;
 }
 
 const SPAWN_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -15,15 +17,49 @@ const SPAWN_POSITIONS: Record<string, { x: number; y: number }> = {
   value:      { x: 576,  y: 800 },
   quant:      { x: 2240, y: 1920 },
   whale:      { x: 2560, y: 1600 },
-  news:       { x: 1440, y: 1280 },
   contrarian: { x: 640,  y: 1920 },
 };
 
+const FALLBACK_SPAWNS = [
+  { x: 1440, y: 1280 }, { x: 800,  y: 1400 }, { x: 1800, y: 800 },
+  { x: 1100, y: 2000 }, { x: 2000, y: 1200 }, { x: 700,  y: 1700 },
+  { x: 1600, y: 1600 }, { x: 2200, y: 800 },  { x: 960,  y: 960 },
+  { x: 1900, y: 1900 }, { x: 500,  y: 1200 }, { x: 2600, y: 1000 },
+  { x: 1200, y: 600 },  { x: 1700, y: 2100 }, { x: 2100, y: 1500 },
+  { x: 400,  y: 1600 }, { x: 1500, y: 1000 }, { x: 2300, y: 1800 },
+  { x: 850,  y: 2100 },
+];
+
 const WANDER_RADIUS = 96;
 
-export default function PhaserGame({ agents, onSelectAgent }: Props) {
+export default function PhaserGame({ agents, onSelectAgent, mapRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
+
+  useImperativeHandle(mapRef, () => ({
+    zoomIn: () => {
+      const scene = gameRef.current?.scene.scenes[0];
+      if (scene) {
+        const cam = scene.cameras.main;
+        cam.setZoom(Phaser.Math.Clamp(cam.zoom + 0.15, 0.3, 3));
+      }
+    },
+    zoomOut: () => {
+      const scene = gameRef.current?.scene.scenes[0];
+      if (scene) {
+        const cam = scene.cameras.main;
+        cam.setZoom(Phaser.Math.Clamp(cam.zoom - 0.15, 0.3, 3));
+      }
+    },
+    setSpeed: (speed: number) => {
+      const scene = gameRef.current?.scene.scenes[0];
+      if (scene) {
+        scene.time.timeScale = speed;
+        scene.physics.world.timeScale = 1 / speed;
+        scene.anims.globalTimeScale = speed;
+      }
+    },
+  }));
   const onSelectAgentRef = useRef(onSelectAgent);
   onSelectAgentRef.current = onSelectAgent;
   const agentsRef = useRef(agents);
@@ -64,12 +100,16 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
         this.load.image("CuteRPG_Desert_B", "/assets/the_ville/visuals/map_assets/cute_rpg_word_VXAce/tilesets/CuteRPG_Desert_B.png");
         this.load.image("CuteRPG_Forest_C", "/assets/the_ville/visuals/map_assets/cute_rpg_word_VXAce/tilesets/CuteRPG_Forest_C.png");
 
-        // Character atlas from CDN (misa)
-        this.load.atlas(
-          "atlas",
-          "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.png",
-          "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.json"
-        );
+        // Per-agent spritesheet (96x128, 32x32 frames, 3cols x 4rows)
+        const currentAgents = agentsRef.current;
+        for (const agent of currentAgents) {
+          if (!this.textures.exists(agent.id)) {
+            this.load.spritesheet(agent.id, agent.sprite, {
+              frameWidth: 32,
+              frameHeight: 32,
+            });
+          }
+        }
       }
 
       create() {
@@ -115,53 +155,69 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
           }
         }
 
-        // Create walk animations from misa atlas
-        const anims = this.anims;
-        const directions = ["left", "right", "front", "back"];
-        for (const dir of directions) {
-          const walkKey = `misa-${dir}-walk`;
-          if (!anims.exists(walkKey)) {
-            anims.create({
-              key: walkKey,
-              frames: anims.generateFrameNames("atlas", {
-                prefix: `misa-${dir}-walk.`,
-                start: 0,
-                end: 3,
-                zeroPad: 3,
-              }),
-              frameRate: 6,
-              repeat: -1,
-            });
+        // Create per-agent walk animations
+        // Spritesheet layout: row0=down(front), row1=left, row2=right, row3=up(back), 3 frames each
+        const currentAgents = agentsRef.current;
+        const dirMap = [
+          { dir: "front", row: 0 },
+          { dir: "left", row: 1 },
+          { dir: "right", row: 2 },
+          { dir: "back", row: 3 },
+        ];
+        for (const agent of currentAgents) {
+          for (const { dir, row } of dirMap) {
+            const key = `${agent.id}-${dir}-walk`;
+            if (!this.anims.exists(key)) {
+              this.anims.create({
+                key,
+                frames: [
+                  { key: agent.id, frame: row * 3 },
+                  { key: agent.id, frame: row * 3 + 1 },
+                  { key: agent.id, frame: row * 3 + 2 },
+                  { key: agent.id, frame: row * 3 + 1 },
+                ],
+                frameRate: 6,
+                repeat: -1,
+              });
+            }
           }
         }
 
         // Place agents
-        const currentAgents = agentsRef.current;
+        let fallbackIdx = 0;
         for (const agent of currentAgents) {
-          const pos = SPAWN_POSITIONS[agent.id] || { x: 1500, y: 1500 };
-          const sprite = this.physics.add.sprite(pos.x, pos.y, "atlas", "misa-front");
+          let pos = SPAWN_POSITIONS[agent.id];
+          if (!pos) {
+            pos = FALLBACK_SPAWNS[fallbackIdx % FALLBACK_SPAWNS.length];
+            fallbackIdx++;
+          }
+          // ponytail: frame 0 = front idle
+          const sprite = this.physics.add.sprite(pos.x, pos.y, agent.id, 0);
           sprite.setScale(1.5);
           sprite.setInteractive({ useHandCursor: true });
           sprite.on("pointerdown", () => {
             onSelectAgentRef.current(agent);
           });
 
-          // Speech bubble
+          // Name label - larger and more visible
           const bubbleBg = this.add.graphics();
           const text = this.add.text(0, 0, agent.alias, {
-            fontSize: "11px",
+            fontSize: "13px",
+            fontStyle: "bold",
             color: "#ffffff",
-            fontFamily: "sans-serif",
-            padding: { x: 6, y: 3 },
+            fontFamily: "Pretendard, sans-serif",
+            padding: { x: 8, y: 4 },
           });
           text.setOrigin(0.5);
 
-          const w = text.width + 16;
-          const h = text.height + 8;
-          bubbleBg.fillStyle(0x000000, 0.7);
-          bubbleBg.fillRoundedRect(-w / 2, -h / 2, w, h, 6);
+          const w = text.width + 20;
+          const h = text.height + 10;
+          bubbleBg.fillStyle(0x000000, 0.75);
+          bubbleBg.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
+          bubbleBg.lineStyle(1, 0xc8a84e, 0.4);
+          bubbleBg.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
 
-          const bubbleContainer = this.add.container(pos.x, pos.y - 36, [bubbleBg, text]);
+          const bubbleContainer = this.add.container(pos.x, pos.y - 40, [bubbleBg, text]);
           bubbleContainer.setDepth(100);
 
           const homeX = pos.x;
@@ -175,7 +231,7 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
         // Camera
         this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
         this.cameras.main.centerOn(1500, 1500);
-        this.cameras.main.setZoom(0.8);
+        this.cameras.main.setZoom(0.6);
 
         this.cursors = this.input.keyboard!.createCursorKeys();
 
@@ -233,17 +289,18 @@ export default function PhaserGame({ agents, onSelectAgent }: Props) {
             a.targetX = a.homeX + (Math.random() - 0.5) * WANDER_RADIUS * 2;
             a.targetY = a.homeY + (Math.random() - 0.5) * WANDER_RADIUS * 2;
             a.sprite.anims.stop();
-            a.sprite.setFrame("misa-front");
+            a.sprite.setFrame(0);
           } else {
             const moveSpeed = 30;
             const vx = (dx / dist) * moveSpeed;
             const vy = (dy / dist) * moveSpeed;
             body.setVelocity(vx, vy);
 
+            const id = a.agent.id;
             if (Math.abs(dx) > Math.abs(dy)) {
-              a.sprite.anims.play(dx < 0 ? "misa-left-walk" : "misa-right-walk", true);
+              a.sprite.anims.play(dx < 0 ? `${id}-left-walk` : `${id}-right-walk`, true);
             } else {
-              a.sprite.anims.play(dy < 0 ? "misa-back-walk" : "misa-front-walk", true);
+              a.sprite.anims.play(dy < 0 ? `${id}-back-walk` : `${id}-front-walk`, true);
             }
           }
 

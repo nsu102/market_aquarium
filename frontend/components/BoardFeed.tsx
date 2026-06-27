@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Post } from "@/mock_data/posts";
 import {
   Heart,
@@ -21,6 +21,12 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
   const [activeTab, setActiveTab] = useState("전체");
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
+  const [time, setTime] = useState(() => new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }));
+
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })), 10000);
+    return () => clearInterval(id);
+  }, []);
 
   const filtered =
     activeTab === "전체"
@@ -53,7 +59,7 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
         {/* Notch area */}
         <div className="bg-surface-card px-6 pt-2.5 pb-1">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-text-secondary font-mono font-semibold">14:42</span>
+            <span className="text-[10px] text-text-secondary font-mono font-semibold">{time}</span>
             <div className="w-[72px] h-[20px] bg-text-primary rounded-full" />
             <div className="flex items-center gap-1 text-text-secondary">
               <Signal size={10} strokeWidth={2.5} />

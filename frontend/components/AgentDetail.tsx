@@ -3,12 +3,7 @@
 import { Agent } from "@/mock_data/agents";
 import { X, Wallet, Activity, Briefcase } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
-
-function formatKRW(n: number) {
-  if (n >= 1e8) return `${(n / 1e8).toFixed(1)}억`;
-  if (n >= 1e4) return `${(n / 1e4).toFixed(0)}만`;
-  return n.toLocaleString();
-}
+import { formatKRW } from "@/utils/numberInput";
 
 export default function AgentDetail({
   agent,
