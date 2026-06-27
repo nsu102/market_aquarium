@@ -29,12 +29,12 @@ interface ActiveEvent {
   source: "user" | "system";
 }
 
-// Canonical mode fork + how many steps to queue up front.
+// Canonical mode fork.
 const FORK_SIM_CODE = "base_the_ville_market6";
-// Run the live sim continuously so the map renders agents living their day
-// (reverie is a continuous-time model). The user's event is the market shock
-// injected on top; agents react to it via emotion/posts/trades. 6000 ticks ~5 days.
-const CANONICAL_RUN_STEPS = 6000;
+// One in-game day = 1200 steps. We do NOT run at game start (agents stand idle);
+// each user event injects the shock then runs exactly one day so agents plan the
+// day AFTER the event is set and react to it the same day.
+const STEPS_PER_DAY = 1200;
 
 /** Normalize the control server's event impact into the overlay's enum. */
 function normalizeImpact(
@@ -91,13 +91,14 @@ export default function Home() {
       setCanonicalSim(null);
       setGameStarted(true);
 
-      // Canonical/live path: fork + run the reverie sim so the map renders
-      // immediately (agents live their day). The server auto-drops any prior
-      // sim, so restarting from setup just works.
+      // Canonical/live path: ONLY fork the reverie sim so the map renders
+      // immediately with agents standing idle at their spawn tiles. We do NOT
+      // run here — the day is planned/run only after the user injects an event,
+      // so agents react that same day. The server auto-drops any prior sim, so
+      // restarting from setup just works.
       const sim = `market_${Date.now()}`;
       control
         .start(FORK_SIM_CODE, sim)
-        .then(() => control.run(CANONICAL_RUN_STEPS))
         .then(() => {
           setCanonicalSim(sim);
         })
@@ -117,11 +118,11 @@ export default function Home() {
   }, []);
 
   const handleEvent = useCallback((text: string) => {
-    // Inject the round's global event via the control server. Market/posts
-    // updates then flow back through handleTick on the next movement update.
-    // The sim is already running; agents pick the shock up on their next board
-    // visit (view_sns) and trade, and the day's price distortion reflects it
-    // at the day boundary.
+    // Inject the round's global event, THEN run exactly one in-game day. The day
+    // is planned at the first run step AFTER the event is set, so agents react
+    // that same day (the backend only injects board/exchange visits while an
+    // event is active). Market/posts updates flow back through handleTick as the
+    // movement JSON streams in.
     control
       .marketEvent({ text, is_rumor: false })
       .then((res) => {
@@ -129,6 +130,11 @@ export default function Home() {
           text,
           impact: normalizeImpact(res.impact),
           source: "user",
+        });
+        // Kick off one day. Ignore "already running" errors — a run may still
+        // be draining from a previous event.
+        control.run(STEPS_PER_DAY).catch((err) => {
+          console.warn("[MarketAquarium] run after event:", err);
         });
       })
       .catch((err) => {

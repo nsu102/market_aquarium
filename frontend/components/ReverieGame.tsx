@@ -20,7 +20,7 @@
 
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import Phaser from "phaser";
-import { Loader2, ServerCrash } from "lucide-react";
+import { Loader2, ServerCrash, Zap } from "lucide-react";
 import {
   API_BASE,
   assetUrl,
@@ -42,6 +42,9 @@ const CURR_MAZE = "the_ville";
 // px/frame. TILE_WIDTH must divide evenly so personas land exactly on tiles.
 const MOVEMENT_SPEED = 8;
 const HOME_POLL_MS = 1200;
+// While no run is active the /update poll returns not-ready (<step> === -1).
+// Back off between such polls so we don't hammer the server every frame.
+const UPDATE_BACKOFF_MS = 700;
 
 export interface GameControls {
   zoomIn: () => void;
@@ -64,14 +67,23 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
 
   const personasRef = useRef<GamePersona[]>([]);
   const initialStepRef = useRef(0);
+  // Mirrors `hasMovement` so the Phaser closure can guard the one-time setState.
+  const hasMovementRef = useRef(false);
 
   const [phase, setPhase] = useState<LoadPhase>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Becomes true once the first real movement update streams in (after an event
+  // triggers a run). Until then the agents stand idle and we show a hint.
+  const [hasMovement, setHasMovement] = useState(false);
 
   /* ── 1. Poll /api/home until the forked sim has produced a step ── */
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // Fresh sim: agents start idle again until a new event triggers movement.
+    hasMovementRef.current = false;
+    setHasMovement(false);
 
     const poll = () => {
       getHome()
@@ -120,6 +132,9 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
     let updateInFlight = false;
     let executeMovement: MovementUpdateResponse | null = null;
     let executeCount = executeCountMax;
+    // Timestamp gate: when a /update poll comes back not-ready (no run active),
+    // wait UPDATE_BACKOFF_MS before re-polling instead of spamming every frame.
+    let nextUpdatePollAt = 0;
 
     const personaSprites: Record<string, Phaser.GameObjects.Sprite> = {};
     const labels: Record<string, Phaser.GameObjects.Text> = {};
@@ -378,22 +393,41 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
           () => undefined
         );
         loopPhase = "update";
-      } else if (loopPhase === "update") {
-        if (!updateInFlight) {
-          updateInFlight = true;
-          updateEnvironment(step, simCode)
-            .then((resp) => {
-              if (resp["<step>"] === step) {
-                executeMovement = resp;
-                loopPhase = "execute";
+        return;
+      }
+
+      if (loopPhase === "update") {
+        // One poll in flight at a time; back off after a not-ready response so
+        // we don't spam the server while no run is active (agents stay idle).
+        if (updateInFlight || Date.now() < nextUpdatePollAt) return;
+        updateInFlight = true;
+        updateEnvironment(step, simCode)
+          .then((resp) => {
+            if (resp["<step>"] === step) {
+              // Movement for this step is ready — animate it.
+              executeMovement = resp;
+              loopPhase = "execute";
+              if (!hasMovementRef.current) {
+                hasMovementRef.current = true;
+                setHasMovement(true);
               }
-            })
-            .catch(() => undefined)
-            .finally(() => {
-              updateInFlight = false;
-            });
-        }
-      } else {
+            } else {
+              // Not ready (e.g. <step> === -1): no run active yet. Stay idle and
+              // re-poll quietly after a short backoff. No throw, no console spam.
+              nextUpdatePollAt = Date.now() + UPDATE_BACKOFF_MS;
+            }
+          })
+          .catch(() => {
+            // Transient error (server warming up): back off and retry quietly.
+            nextUpdatePollAt = Date.now() + UPDATE_BACKOFF_MS;
+          })
+          .finally(() => {
+            updateInFlight = false;
+          });
+        return;
+      }
+
+      {
         // execute
         personasMeta.forEach((p) => {
           const under = p.underscore;
@@ -458,7 +492,23 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
 
   /* ── Render ── */
   if (phase === "ready") {
-    return <div ref={containerRef} className="h-full w-full" />;
+    // Map + idle agents render immediately. The hint is a small non-blocking
+    // overlay shown only until the first movement starts flowing (post-event).
+    return (
+      <div className="relative h-full w-full">
+        <div ref={containerRef} className="h-full w-full" />
+        {!hasMovement && (
+          <div className="pointer-events-none absolute left-1/2 bottom-6 -translate-x-1/2 z-10">
+            <div className="flex items-center gap-2 rounded-full bg-surface-card/90 border border-border-light px-4 py-2 shadow-[0_4px_20px_rgba(0,0,0,0.12)] backdrop-blur-sm">
+              <Zap size={15} className="text-accent-blue" />
+              <span className="text-[12px] font-medium text-text-secondary">
+                이벤트를 입력하면 에이전트가 움직입니다
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -478,7 +528,7 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
           <Loader2 size={26} className="text-accent-blue animate-spin" />
           <div className="text-sm font-medium">시뮬레이션을 준비하는 중…</div>
           <div className="text-[11px] text-text-tertiary">
-            에이전트가 첫 스텝을 생성할 때까지 기다리는 중입니다.
+            맵과 에이전트를 불러오는 중입니다.
           </div>
         </>
       )}
