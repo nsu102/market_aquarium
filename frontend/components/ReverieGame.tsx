@@ -687,16 +687,6 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
     return (
       <div className="relative h-full w-full">
         <div ref={containerRef} className="h-full w-full" />
-        {!hasMovement && (
-          <div className="pointer-events-none absolute left-1/2 bottom-6 -translate-x-1/2 z-10">
-            <div className="flex items-center gap-2 rounded-full bg-surface-card/90 border border-border-light px-4 py-2 shadow-[0_4px_20px_rgba(0,0,0,0.12)] backdrop-blur-sm">
-              <Zap size={15} className="text-accent-blue" />
-              <span className="text-[12px] font-medium text-text-secondary">
-                이벤트를 입력하면 에이전트가 움직입니다
-              </span>
-            </div>
-          </div>
-        )}
       </div>
     );
   }

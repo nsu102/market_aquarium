@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { filterNumeric, filterInt, formatKRW } from "@/utils/numberInput";
 import PixelButton from "@/components/pixel/PixelButton";
-import { loadSessionUid } from "@/lib/control";
+import { loadSessionUid, fetchPresets, type PresetsMap, type PresetSpec } from "@/lib/control";
 
 /* ── Types ── */
 
@@ -50,7 +50,7 @@ interface SetupAgent {
 }
 
 interface Props {
-  onStart: (agents: Agent[], assets: Asset[]) => void;
+  onStart: (agents: Agent[], assets: Asset[], presetIndices?: Record<string, number>) => void;
   onResume?: () => void;
 }
 
@@ -73,9 +73,31 @@ export default function SetupScreen({ onStart, onResume }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [editingAsset, setEditingAsset] = useState<string | null>(null);
   const [hasSavedSession, setHasSavedSession] = useState(false);
+  const [presets, setPresets] = useState<PresetsMap | null>(null);
+  const [presetIndices, setPresetIndices] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setHasSavedSession(!!loadSessionUid());
+    fetchPresets().then((p) => {
+      setPresets(p);
+      // Apply default preset (index 0) to all agents on load
+      setAgents((prev) => prev.map((a) => {
+        const specs = p[a.id];
+        if (!specs?.length) return a;
+        const spec = specs[0];
+        const total = spec.total;
+        const cash = total * spec.cash_pct / 100;
+        const portfolio = Object.entries(spec.alloc)
+          .filter(([, pct]) => pct > 0)
+          .map(([sym, pct]) => {
+            const assetInfo = DEFAULT_ASSETS.find((da) => da.symbol === sym);
+            const price = assetInfo?.price ?? 1;
+            const invest = total * pct / 100;
+            return { asset: sym, amount: +(invest / price).toFixed(6), avgPrice: price };
+          });
+        return { ...a, cash, portfolio };
+      }));
+    }).catch(() => {});
   }, []);
 
   const selected = agents[selectedIdx];
@@ -100,20 +122,45 @@ export default function SetupScreen({ onStart, onResume }: Props) {
     updateAgent({ portfolio: selected.portfolio.map((p) => (p.asset === asset ? { ...p, ...patch } : p)) });
   };
 
+  const applyPreset = (agent: SetupAgent, spec: PresetSpec): Partial<SetupAgent> => {
+    const total = spec.total;
+    const cash = total * spec.cash_pct / 100;
+    const portfolio = Object.entries(spec.alloc)
+      .filter(([, pct]) => pct > 0)
+      .map(([sym, pct]) => {
+        const assetInfo = DEFAULT_ASSETS.find((a) => a.symbol === sym);
+        const price = assetInfo?.price ?? 1;
+        const invest = total * pct / 100;
+        return { asset: sym, amount: +(invest / price).toFixed(6), avgPrice: price };
+      });
+    return { cash, portfolio };
+  };
+
   const randomize = () => {
+    const newIndices: Record<string, number> = {};
     setAgents((prev) =>
-      prev.map((a) => ({
-        ...a,
-        cash: Math.round(a.cash * (0.3 + Math.random() * 1.4) || 5000000),
-        fear: Math.round(Math.random() * 100),
-        greed: Math.round(Math.random() * 100),
-        portfolio: DEFAULT_ASSETS.filter(() => Math.random() > 0.5).map((ea) => ({
-          asset: ea.symbol,
-          amount: +(Math.random() * (ea.price > 1e6 ? 1 : 100)).toFixed(ea.price > 1e6 ? 4 : 2),
-          avgPrice: Math.round(ea.price * (0.8 + Math.random() * 0.4)),
-        })),
-      }))
+      prev.map((a) => {
+        const agentPresets = presets?.[a.id];
+        if (agentPresets && agentPresets.length > 0) {
+          const idx = Math.floor(Math.random() * agentPresets.length);
+          newIndices[a.id] = idx;
+          return { ...a, ...applyPreset(a, agentPresets[idx]) };
+        }
+        // fallback for custom agents without presets
+        return {
+          ...a,
+          cash: Math.round(a.cash * (0.3 + Math.random() * 1.4) || 5000000),
+          fear: Math.round(Math.random() * 100),
+          greed: Math.round(Math.random() * 100),
+          portfolio: DEFAULT_ASSETS.filter(() => Math.random() > 0.5).map((ea) => ({
+            asset: ea.symbol,
+            amount: +(Math.random() * (ea.price > 1e6 ? 1 : 100)).toFixed(ea.price > 1e6 ? 4 : 2),
+            avgPrice: Math.round(ea.price * (0.8 + Math.random() * 0.4)),
+          })),
+        };
+      })
     );
+    setPresetIndices(newIndices);
   };
 
   const addAgent = () => {
@@ -177,7 +224,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
       symbol: a.symbol, name: a.name, price: a.price, change24h: 0, volume: 0,
       priceHistory: seedPriceHistory(a.symbol, a.price),
     }));
-    onStart(finalAgents, finalAssets);
+    onStart(finalAgents, finalAssets, Object.keys(presetIndices).length > 0 ? presetIndices : undefined);
   };
 
   const totalValue = useMemo(() => {
@@ -287,9 +334,9 @@ export default function SetupScreen({ onStart, onResume }: Props) {
             {/* Traits + Delete */}
             <div className="px-3 pb-3">
               <Hdr title="특징" icon={Shield} />
-              <div className="flex flex-wrap gap-1.5 mb-2">
+              <div className="flex gap-1.5 mb-2 overflow-x-auto">
                 {selected.traits.map((t) => (
-                  <span key={t} className="inline-flex items-center bg-white border-2 border-black rounded-full px-2.5 py-[3px] text-[10px] text-black font-medium leading-none">
+                  <span key={t} className="inline-flex items-center bg-white border-2 border-black rounded-full px-2.5 py-[3px] text-[10px] text-black font-medium leading-none whitespace-nowrap flex-shrink-0">
                     {t}
                   </span>
                 ))}

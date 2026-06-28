@@ -18,6 +18,7 @@ import { Post } from "@/mock_data/posts";
 import { rounds } from "@/mock_data/rounds";
 import { GameEvent } from "@/mock_data/events";
 import * as control from "@/lib/control";
+import { sfxTrade, sfxPost } from "@/utils/sfx";
 import { Loader2 } from "lucide-react";
 import type { ReverieMeta, RoundReportMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
@@ -147,7 +148,7 @@ export default function Home() {
   }, []);
 
   const handleStart = useCallback(
-    (setupAgents: Agent[], setupAssets: Asset[]) => {
+    (setupAgents: Agent[], setupAssets: Asset[], presetIndices?: Record<string, number>) => {
       seedFromSetup(setupAgents, setupAssets);
       setCanonicalSim(null);
       setGameStarted(true);
@@ -157,7 +158,7 @@ export default function Home() {
 
       const sim = `market_${Date.now()}`;
       control
-        .start(FORK_SIM_CODE, sim)
+        .start(FORK_SIM_CODE, sim, presetIndices)
         .then((res) => {
           setCanonicalSim(sim);
           if (res.uid) {
@@ -223,7 +224,18 @@ export default function Home() {
     if (meta.posts) setPosts(meta.posts);
     if (meta.events) setEvents(meta.events);
     if (typeof meta.round === "number") setCurrentRound(meta.round);
-    if (meta.agents && meta.agents.length) setAgents(meta.agents);
+    if (meta.agents && meta.agents.length) {
+      setAgents((prev) => {
+        // sfx: play trade sound only when an agent's lastAction CHANGES to a trade
+        const prevMap = new Map(prev.map((a) => [a.id, a.lastAction]));
+        const newTrade = meta.agents!.some((a: Agent) => {
+          const old = prevMap.get(a.id);
+          return old !== a.lastAction && (a.lastAction === "BUY" || a.lastAction === "SELL" || a.lastAction === "BUY_LARGE");
+        });
+        if (newTrade) sfxTrade();
+        return meta.agents!;
+      });
+    }
     if (meta.round_report) setRoundReport(meta.round_report);
     // Extract board-specific data when available
     if ((meta as any).sns_agents) setSnsAgents((meta as any).sns_agents);
@@ -289,7 +301,7 @@ export default function Home() {
       control
         .boardPost({ uid: sessionUid ?? undefined, ...input })
         .then((res) => {
-          if (res.posts) setPosts(res.posts);
+          if (res.posts) { setPosts(res.posts); sfxPost(); }
           if (res.agents) setAgents(res.agents);
           if (res.sns_agents) setSnsAgents(res.sns_agents);
           if (res.emotion_deltas) setEmotionDeltas(res.emotion_deltas);
@@ -317,9 +329,11 @@ export default function Home() {
 
   /** A round's animation finished -> tell the player with the round summary. */
   const handleRoundEnd = useCallback((_round: number) => {
+    stopTimer();
+    setPlaying(false);
     setReportOpen(true);
     setNeedEvent(true);
-  }, []);
+  }, [stopTimer]);
 
   /** Click a character on the map -> open its detail (portfolio composition). */
   const handleSelectAgent = useCallback(
@@ -370,82 +384,74 @@ export default function Home() {
     }
     : { round: currentRound, markdown: mockReport.markdown };
 
-  // The board-top "다음 이벤트" card only appears between rounds (round 2+),
-  // never while the day is playing or being computed.
-  const requestNextEvent =
-    needEvent && !playing && !computing ? handleEvent : undefined;
-
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-surface-primary">
-      {/* Left sidebar + center map + bottom dock */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Main view: full-width map with overlays anchored on top */}
-        <div className="flex-1 flex min-h-0">
-          <main className="relative flex-1 min-w-0">
-            {canonicalSim ? (
-              <ReverieGame
-                simCode={canonicalSim}
-                uid={sessionUid ?? undefined}
-                onTick={handleTick}
-                controlsRef={reverieControlsRef}
-                onSelectAgent={handleSelectAgent}
-                onRoundEnd={handleRoundEnd}
-                onAgentTrade={handleAgentTrade}
-              />
-            ) : (
-              <div className="h-full w-full flex items-center justify-center bg-white text-pixel-muted text-sm font-bold animate-pulse-soft">
-                라이브 시뮬레이션을 준비하는 중...
-              </div>
-            )}
-
-            {/* Discord-style voice overlay roster (floats over the map, top-left) */}
-            {marketOpen && (
-              <div className="absolute top-14 left-2 z-30 w-[260px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1">
-                <AgentSidebar agents={agents} alerts={tradeAlerts} onSelect={setSelectedAgent} />
-              </div>
-            )}
-
-            <GameHUD
-              round={currentRound}
-              clock={formatClock(clock)}
-              playing={playing}
-              onEvent={handleEvent}
-              marketOpen={marketOpen}
-              boardOpen={boardOpen}
-              onToggleMarket={() => setMarketOpen(!marketOpen)}
-              onToggleBoard={() => setBoardOpen(!boardOpen)}
-              onToggleReport={handleToggleReport}
-              reportOpen={reportOpen}
-              marketNotifications={events.length}
-              boardNotifications={posts.length}
-              onZoomIn={handleZoomIn}
-              onZoomOut={handleZoomOut}
-              onKeyboardEnabled={handleKeyboardEnabled}
-              forceEventOpen={needEvent}
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-surface-primary">
+      {/* Top: map + board side by side */}
+      <div className="flex-1 flex min-h-0">
+        {/* Map + overlays */}
+        <main className="relative flex-1 min-w-0">
+          {canonicalSim ? (
+            <ReverieGame
+              simCode={canonicalSim}
+              uid={sessionUid ?? undefined}
+              onTick={handleTick}
+              controlsRef={reverieControlsRef}
+              onSelectAgent={handleSelectAgent}
+              onRoundEnd={handleRoundEnd}
+              onAgentTrade={handleAgentTrade}
             />
-          </main>
-        </div>
+          ) : (
+            <div className="h-full w-full flex items-center justify-center bg-white text-pixel-muted text-sm font-bold animate-pulse-soft">
+              라이브 시뮬레이션을 준비하는 중...
+            </div>
+          )}
 
-        {/* Bottom dock: market price ticker */}
-        <AssetTicker assets={marketData?.assets ?? []} onSelect={setSelectedAsset} />
+          {/* Discord-style voice overlay roster (floats over the map, top-left) */}
+          {marketOpen && (
+            <div className="absolute top-14 left-2 z-30 w-[260px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1">
+              <AgentSidebar agents={agents} alerts={tradeAlerts} onSelect={setSelectedAgent} />
+            </div>
+          )}
+
+          <GameHUD
+            round={currentRound}
+            clock={formatClock(clock)}
+            playing={playing}
+            onEvent={handleEvent}
+            marketOpen={marketOpen}
+            boardOpen={boardOpen}
+            onToggleMarket={() => setMarketOpen(!marketOpen)}
+            onToggleBoard={() => setBoardOpen(!boardOpen)}
+            onToggleReport={handleToggleReport}
+            reportOpen={reportOpen}
+            marketNotifications={events.length}
+            boardNotifications={posts.length}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onKeyboardEnabled={handleKeyboardEnabled}
+            forceEventOpen={needEvent}
+          />
+        </main>
+
+        {/* Right column: board feed */}
+        {boardOpen && (
+          <aside className="w-[370px] shrink-0 border-l-2 border-black overflow-hidden">
+            <BoardFeed
+              posts={posts}
+              events={events}
+              agents={agents}
+              snsAgents={snsAgents}
+              emotionDeltas={emotionDeltas}
+              currentRound={currentRound}
+              onPost={handlePost}
+              onVote={handleVote}
+            />
+          </aside>
+        )}
       </div>
 
-      {/* Right column: board feed, full height */}
-      {boardOpen && (
-        <aside className="w-[370px] shrink-0 border-l-2 border-black overflow-hidden">
-          <BoardFeed
-            posts={posts}
-            events={events}
-            agents={agents}
-            snsAgents={snsAgents}
-            emotionDeltas={emotionDeltas}
-            currentRound={currentRound}
-            onPost={handlePost}
-            onVote={handleVote}
-            onRequestEvent={requestNextEvent}
-          />
-        </aside>
-      )}
+      {/* Bottom dock: full-width market price ticker */}
+      <AssetTicker assets={marketData?.assets ?? []} onSelect={setSelectedAsset} />
 
       {/* Round report - center modal */}
       {reportOpen && (
@@ -458,9 +464,6 @@ export default function Home() {
           <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg px-6 py-5 flex flex-col items-center gap-3 max-w-[320px]">
             <Loader2 size={28} className="text-pixel-greenText animate-spin" />
             <div className="text-sm font-bold text-black">에이전트들이 반응하는 중...</div>
-            <div className="text-[11px] text-pixel-muted text-center leading-relaxed">
-              이벤트를 인식하고 게시판·매매를 결정하고 있어요. 잠시만요.
-            </div>
           </div>
         </div>
       )}

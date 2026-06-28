@@ -26,10 +26,24 @@ def _load_allocations() -> dict:
     docs = list(_db().allocations.find())
     if not docs:
         raise RuntimeError("allocations not found in MongoDB — run: python -m backend.seed")
-    return {d["_id"]: {k: v for k, v in d.items() if k != "_id"} for d in docs}
+    result = {}
+    for d in docs:
+        pid = d["_id"]
+        # New format: {"_id": ..., "presets": [...]}
+        # Legacy format: {"_id": ..., "total": ..., "cash_pct": ..., "alloc": ...}
+        if "presets" in d:
+            result[pid] = d["presets"]
+        else:
+            result[pid] = {k: v for k, v in d.items() if k != "_id"}
+    return result
 
 
 _ALLOCATIONS: dict = _load_allocations()
+
+
+def get_all_presets() -> dict[str, list[dict]]:
+    """Return raw presets per persona for the /control/presets endpoint."""
+    return _ALLOCATIONS
 
 def _load_personas_from_db() -> list[Persona]:
     from backend.db import _db
@@ -272,23 +286,17 @@ def get_persona(persona_id: str) -> Persona:
     return _POOL_BY_ID[persona_id]
 
 
-def _precomputed_portfolio(
-    persona: Persona, prices: dict[str, float]
+def _apply_spec(
+    spec: dict, prices: dict[str, float]
 ) -> tuple[float, list[PortfolioHolding]]:
-    """Deterministically split the persona's set capital into cash + holdings
-    using the baked allocation (cash% + per-asset%). No randomness."""
-    spec = _ALLOCATIONS.get(persona.persona_id)
-    if not spec:
-        # Fallback: keep all as cash from the pool's middle value.
-        mid = persona.cash_pool[len(persona.cash_pool) // 2] if persona.cash_pool else 5_000_000
-        return float(mid), []
+    """Turn a single allocation spec {total, cash_pct, alloc} into (cash, holdings)."""
     total = float(spec.get("total", 0))
     cash = total * float(spec.get("cash_pct", 0)) / 100.0
     holdings: list[PortfolioHolding] = []
     for sym, pct in (spec.get("alloc") or {}).items():
         price = prices.get(sym)
         if not price or price <= 0:
-            cash += total * float(pct) / 100.0  # asset unavailable -> keep as cash
+            cash += total * float(pct) / 100.0
             continue
         invest = total * float(pct) / 100.0
         amount = round(invest / price, 6)
@@ -297,10 +305,28 @@ def _precomputed_portfolio(
     return cash, holdings
 
 
-def build_agent(persona: Persona, prices: dict[str, float], rng: random.Random) -> Agent:
+def _precomputed_portfolio(
+    persona: Persona, prices: dict[str, float], preset_index: int = 0,
+) -> tuple[float, list[PortfolioHolding]]:
+    """Deterministically split the persona's set capital into cash + holdings
+    using the baked allocation (cash% + per-asset%). No randomness."""
+    raw = _ALLOCATIONS.get(persona.persona_id)
+    if not raw:
+        mid = persona.cash_pool[len(persona.cash_pool) // 2] if persona.cash_pool else 5_000_000
+        return float(mid), []
+    # ponytail: support both old dict and new list[dict] format
+    if isinstance(raw, list):
+        spec = raw[preset_index % len(raw)]
+    else:
+        spec = raw
+    return _apply_spec(spec, prices)
+
+
+def build_agent(persona: Persona, prices: dict[str, float], rng: random.Random,
+                preset_index: int = 0) -> Agent:
     # rng kept in the signature for API compatibility; portfolio is now
     # deterministic (pre-computed allocation), not sampled.
-    cash, portfolio = _precomputed_portfolio(persona, prices)
+    cash, portfolio = _precomputed_portfolio(persona, prices, preset_index)
     return Agent(
         id=persona.persona_id,
         alias=persona.alias,
@@ -334,6 +360,7 @@ def sample_agents(
     seed: int = 42,
     persona_ids: list[str] | None = None,
     prices: dict[str, float] | None = None,
+    preset_indices: dict[str, int] | None = None,
 ) -> list[Agent]:
     """Deterministically build n runtime agents from the pool (PRD §2.3)."""
     rng = random.Random(seed)
@@ -345,7 +372,8 @@ def sample_agents(
         else:
             extra = [p.persona_id for p in PERSONA_POOL if p.persona_id not in DEFAULT_PERSONA_IDS]
             persona_ids = (DEFAULT_PERSONA_IDS + extra)[:n]
-    return [build_agent(_POOL_BY_ID[pid], prices, rng) for pid in persona_ids]
+    pi = preset_indices or {}
+    return [build_agent(_POOL_BY_ID[pid], prices, rng, pi.get(pid, 0)) for pid in persona_ids]
 
 
 def build_sns_agent(persona: Persona) -> Agent:

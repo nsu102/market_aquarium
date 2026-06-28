@@ -62,8 +62,13 @@ sys.path.insert(0, _REPO)
 # the_ville location mapping (use existing places).
 # --------------------------------------------------------------------------- #
 BOARD_TILE = (32, 45)  # 게시판
-EXCHANGE_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 거래소 (기존 게시판 위치)
-CAFE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 카페 (기존 거래소 위치)
+BOARD_ADDR = "the Ville:artist's co-living space:common room:common room table"  # 게시판 (커뮤니티 보드)
+EXCHANGE_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 거래소
+CAFE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 카페
+# ponytail: wandering destinations — just the main spots + homes
+DAILY_SPOTS = [
+    ("cafe", CAFE_ADDR),
+]
 
 FORK_ENV0 = join(
     _REPO, "environment", "frontend_server", "storage",
@@ -104,9 +109,9 @@ def _maze() -> Maze:
 class Live:
     """Holds one live game: the engine session + the current movement timeline."""
 
-    def __init__(self, sim_code: str, assets=None, seed: int = 42):
+    def __init__(self, sim_code: str, assets=None, seed: int = 42, preset_indices: dict[str, int] | None = None):
         self.sim_code = sim_code
-        self.game = GameSession(assets=assets, seed=seed)
+        self.game = GameSession(assets=assets, seed=seed, preset_indices=preset_indices)
         self.homes = self._load_homes()  # original name -> (x, y)
         # engine agent -> reverie persona (original/underscore) via sprite filename
         self.persona = []  # list of {agent, original, underscore, initial, home}
@@ -366,24 +371,56 @@ class Live:
         return out
 
     def movement_payload(self, step: int) -> dict:
-        """Map life only: every persona takes one wander step. The board/market
-        is NOT driven here anymore — the frontend timer replays the scenario.
-        Always returns a ready movement so the agents wander continuously (even
-        before the first event), and never ends (no timeline to drain)."""
         if step > self.last_poll_step:
             self.last_poll_step = step
-        persona = {}
-        for p in self.persona:
-            orig = p["original"]
-            x, y = self._advance_walk(orig)
-            persona[orig] = {
+        idx = step - self.base
+        if not self.timeline or idx < 0 or idx >= len(self.timeline):
+            return {"<step>": -1}
+        frame = self.timeline[idx]
+        st = self.game.state()
+        rnd = self.game.round
+        # Ramp market indices + prices from the pre-round snapshot to the final
+        # values across the day animation, so the numbers change in step with the
+        # agents' movement instead of all jumping at once.
+        market = self._progressive_market(idx, st["market"])
+        # Reveal posts progressively: a CURRENT-round agent post only appears once
+        # that agent has ARRIVED at the board in the animation (board_arrival).
+        # Past-round posts and the system 속보 are always shown.
+        # SNS spectator posts trickle in via the reveal schedule.
+        sns_ids = {a.id for a in self.game.sns_agents}
+        visible_posts = []
+        for post in st["posts"]:
+            aid = post.get("agentId")
+            pid = post.get("id", "")
+            if post.get("round", 0) < rnd:
+                visible_posts.append(post)
+            elif aid == "system" or aid == "user":
+                visible_posts.append(post)
+            elif aid in sns_ids:
+                if self.reveal.get(pid, 10**9) <= step:
+                    visible_posts.append(post)
+            elif self.board_arrival.get(aid, 10**9) <= step:
+                visible_posts.append(post)
+        meta = {
+            "curr_time": f"Day {self.game.round}",
+            "round": self.game.round,
+            "market": market,
+            "posts": visible_posts,
+            "events": st["events"],
+            "agents": st["agents"],
+            "plans": st.get("plans", []),
+            "round_report": st.get("round_report"),
+            "finished": st.get("finished", False),
+        }
+        persona = {
+            orig: {
                 "movement": [int(x), int(y)],
                 "pronunciatio": ".",
-                "description": "자유 행동",
+                "description": desc,
                 "chat": None,
             }
-        # Light meta: just the round (the board state travels via /market/event).
-        meta = {"curr_time": f"Day {self.game.round}", "round": self.game.round}
+            for orig, (x, y, desc) in frame.items()
+        }
         return {"<step>": step, "persona": persona, "meta": meta}
 
 
@@ -427,6 +464,7 @@ class StartBody(BaseModel):
     fork_sim_code: str | None = None
     sim_code: str
     seed: int | None = None  # optional user-specified seed
+    preset_indices: dict[str, int] | None = None  # persona_id -> preset index
 
 
 class ResumeBody(BaseModel):
@@ -482,6 +520,13 @@ def control_status(uid: str | None = None):
             "base": live.base, "last_poll_step": live.last_poll_step}
 
 
+@app.get("/control/presets")
+def control_presets():
+    """Return portfolio allocation presets per persona."""
+    from backend.sim.personas import get_all_presets
+    return get_all_presets()
+
+
 @app.post("/control/start")
 def control_start(body: StartBody):
     from backend import db  # lazy import
@@ -507,7 +552,7 @@ def control_start(body: StartBody):
     assets = load_assets_from_artifact(artifact)
 
     # 5. Create Live session
-    live = Live(body.sim_code, assets=assets, seed=seed)
+    live = Live(body.sim_code, assets=assets, seed=seed, preset_indices=body.preset_indices)
     _SESSIONS[uid] = live
 
     return {
@@ -576,9 +621,10 @@ def control_market_event(body: EventBody):
     _st = live.game.state()
     live.final_market = _st["market"]
     live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
-    # NOTE: the timeline is NOT built here. The round is fully computed, but its
-    # animation must wait until the player presses "게임 시작" -> control_run
-    # builds the timeline then, so nothing moves before the user confirms.
+    try:
+        live.build_timeline()
+    except Exception as e:
+        return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
 
     # persist game state to DB
     try:
@@ -588,15 +634,9 @@ def control_market_event(body: EventBody):
         print(f"[WARN] save_game_state failed: {e}")
 
     ev = live.game.events[0] if live.game.events else None
-    # Full round payload so the frontend timer can replay the scenario over ~2
-    # real minutes: state (posts + scenario + agents + emotion_deltas + report)
-    # plus the pre/post-round market snapshots to interpolate prices/indices.
     return {"status": "ok", "round": live.game.round,
             "event": ev.text if ev else body.text,
-            "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral",
-            "state": _st,
-            "start_market": live.start_market,
-            "final_market": live.final_market}
+            "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
 
 
 @app.get("/control/market/state")
@@ -723,19 +763,7 @@ def control_report_overall(uid: str | None = None):
 
 @app.post("/control/run")
 def control_run(body: RunBody):
-    """The "게임 시작" gate (D1): build the computed round's timeline NOW so the
-    day animation starts only after the player confirms — not on event submit."""
-    live = _get_live(body.uid)
-    if live is None:
-        return {"status": "error", "error": "not started"}
-    # Build once per round (a re-press must not rewind/rebuild with a later base).
-    if live.built_round != live.game.round and live.game.round > 0:
-        try:
-            live.build_timeline()
-            live.built_round = live.game.round
-        except Exception as e:
-            return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
-    return {"status": "ok", "count": body.count, "round": live.game.round}
+    return {"status": "ok", "count": body.count}
 
 
 @app.get("/control/sessions")

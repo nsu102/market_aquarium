@@ -49,8 +49,8 @@ def seed_allocations(db):
     for pid, spec in raw.items():
         if pid.startswith("_"):
             continue
-        doc = dict(spec)
-        doc["_id"] = pid
+        # spec is now a list of presets (or legacy single dict)
+        doc = {"_id": pid, "presets": spec if isinstance(spec, list) else [spec]}
         docs.append(doc)
 
     db.allocations.drop()

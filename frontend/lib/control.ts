@@ -163,12 +163,24 @@ export function getStatus(uid?: string): Promise<ControlStatus> {
   return getJson<ControlStatus>(`/control/status${q}`);
 }
 
+/** Allocation presets per persona: { persona_id: [{total, cash_pct, alloc}] } */
+export type PresetSpec = { total: number; cash_pct: number; alloc: Record<string, number> };
+export type PresetsMap = Record<string, PresetSpec[]>;
+
+export function fetchPresets(): Promise<PresetsMap> {
+  return getJson<PresetsMap>("/control/presets");
+}
+
 /** Fork `fork_sim_code` into a fresh `sim_code` and load it. */
 export function start(
   fork_sim_code: string,
-  sim_code: string
+  sim_code: string,
+  presetIndices?: Record<string, number>,
 ): Promise<StartResponse> {
-  return postJson<StartResponse>("/control/start", { fork_sim_code, sim_code });
+  return postJson<StartResponse>("/control/start", {
+    fork_sim_code, sim_code,
+    ...(presetIndices ? { preset_indices: presetIndices } : {}),
+  });
 }
 
 /** Run N steps in the background; the simulator drives them via process/update. */

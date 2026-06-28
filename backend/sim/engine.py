@@ -91,6 +91,7 @@ class GameSession:
         seed: int = 42,
         client: LLMClient | None = None,
         assets=None,
+        preset_indices: dict[str, int] | None = None,
     ):
         self.seed = seed
         self.num_agents = num_agents
@@ -103,7 +104,7 @@ class GameSession:
         self.assets = assets if assets is not None else load_assets()
         self.sectors = load_sectors()
         prices = {a.symbol: a.price for a in self.assets}
-        self.agents: list[Agent] = sample_agents(num_agents, seed=seed, prices=prices)
+        self.agents: list[Agent] = sample_agents(num_agents, seed=seed, prices=prices, preset_indices=preset_indices)
         # SNS-only spectators (D2): board-only crowd, as many as the players.
         self.sns_agents: list[Agent] = sample_sns_agents(num_agents)
         self.posts: list[Post] = []

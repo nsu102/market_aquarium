@@ -8,16 +8,11 @@ import {
   Heart,
   ThumbsDown,
   MessageCircle,
-  Signal,
-  Battery,
-  Wifi,
   MoreHorizontal,
   Send,
   AtSign,
   X,
   Newspaper,
-  Rss,
-  Activity,
   Zap,
   Layers,
   ChevronDown,
@@ -25,8 +20,6 @@ import {
 } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
 import { AGENT_PROFILES } from "@/constants/agentProfiles";
-
-type Tab = "feed" | "emotion";
 
 interface BoardComposeInput {
   text: string;
@@ -37,38 +30,6 @@ interface BoardVoteInput {
   post_id: string;
   comment_id?: string;
   dir: "like" | "dislike";
-}
-
-/** 감정 5축 (D3). */
-const EMO_AXES: { key: keyof Agent; label: string }[] = [
-  { key: "greed", label: "탐욕" },
-  { key: "fear", label: "두려움" },
-  { key: "confidence", label: "자신감" },
-  { key: "excitement", label: "흥분" },
-  { key: "trust", label: "신뢰" },
-];
-
-/**
- * 가장 강한 감정 하나를 대표 이모지로 매핑한다 (요청 8). fear/greed 는 값이
- * 클수록, 나머지 양극 축은 50에서 멀수록 강하다(극에 따라 다른 감정).
- * NOTE: frontend/CLAUDE.md 의 "이모지 금지" 규칙을 이 '현재 감정' 표시에 한해
- * 사용자 승인하에 예외 적용한다.
- */
-function dominantEmotion(a: Agent): { emoji: string; label: string } {
-  const greed = Number(a.greed ?? 50);
-  const fear = Number(a.fear ?? 50);
-  const conf = Number(a.confidence ?? 50);
-  const exc = Number(a.excitement ?? 50);
-  const trust = Number(a.trust ?? 50);
-  const cands = [
-    { i: greed, emoji: "🤑", label: "탐욕" },
-    { i: fear, emoji: "😱", label: "두려움" },
-    { i: Math.abs(conf - 50) * 2, emoji: conf >= 50 ? "😎" : "😟", label: conf >= 50 ? "자신감" : "위축" },
-    { i: Math.abs(exc - 50) * 2, emoji: exc >= 50 ? "🤩" : "😌", label: exc >= 50 ? "흥분" : "침착" },
-    { i: Math.abs(trust - 50) * 2, emoji: trust >= 50 ? "🤝" : "🤨", label: trust >= 50 ? "신뢰" : "의심" },
-  ];
-  const top = cands.reduce((m, c) => (c.i > m.i ? c : m));
-  return top.i < 15 ? { emoji: "😐", label: "평온" } : { emoji: top.emoji, label: top.label };
 }
 
 export default function BoardFeed({
@@ -94,7 +55,6 @@ export default function BoardFeed({
   /** Between rounds (round 2+): submit the next event from the board-top card. */
   onRequestEvent?: (text: string) => void;
 }) {
-  const [tab, setTab] = useState<Tab>("feed");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // post id -> comment count last seen by the user (for the "new comment" 느낌표).
   const [seen, setSeen] = useState<Record<string, number>>({});
@@ -102,19 +62,6 @@ export default function BoardFeed({
   const [bumpedLike, setBumpedLike] = useState<Set<string>>(new Set());
   const [bumpedComment, setBumpedComment] = useState<Set<string>>(new Set());
   const prevCounts = useRef<Record<string, { likes: number; comments: number }>>({});
-  const [time, setTime] = useState(() =>
-    new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })
-  );
-  useEffect(() => {
-    const id = setInterval(
-      () =>
-        setTime(
-          new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })
-        ),
-      10000
-    );
-    return () => clearInterval(id);
-  }, []);
 
   // Baseline each post's comment count the first time we see it, so old comments
   // don't all flash the 느낌표; only later increases flag as "new".
@@ -180,94 +127,29 @@ export default function BoardFeed({
   const hasNewComments = (p: Post) => p.comments.length > (seen[p.id] ?? p.comments.length);
 
   return (
-    <div className="h-full flex items-center justify-center py-2">
-      <div className="relative w-full h-full max-w-[330px] max-h-full bg-pixel-ink rounded-[40px] p-2.5 shadow-pixel-lg border-2 border-black">
-        {/* Side buttons */}
-        <div className="absolute -left-[3px] top-[110px] w-[3px] h-9 rounded-l bg-pixel-inkSoft" />
-        <div className="absolute -left-[3px] top-[160px] w-[3px] h-14 rounded-l bg-pixel-inkSoft" />
-        <div className="absolute -right-[3px] top-[140px] w-[3px] h-16 rounded-r bg-pixel-inkSoft" />
-
-        {/* Screen */}
-        <div className="relative w-full h-full bg-white rounded-[30px] overflow-hidden flex flex-col">
-          {/* Status bar */}
-          <div className="relative flex items-center justify-between px-6 pt-2.5 pb-1.5 bg-white text-pixel-ink z-20">
-            <span className="text-[12px] font-bold tracking-tight">{time}</span>
-            <div className="flex items-center gap-1.5">
-              <Signal size={13} strokeWidth={2.5} />
-              <Wifi size={13} strokeWidth={2.5} />
-              <Battery size={14} strokeWidth={2.5} />
-            </div>
-          </div>
-
-          {/* Dynamic island */}
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-[92px] h-[26px] bg-pixel-ink rounded-full z-30 flex items-center justify-end pr-2.5">
-            <div className="w-[7px] h-[7px] rounded-full bg-pixel-inkSoft" />
-          </div>
-
-          {/* App header + tabs (피드 / 감정) */}
-          <div className="px-4 pt-2 pb-2.5 bg-pixel-table border-b-2 border-black">
-            <div className="flex items-center justify-between mb-2.5">
-              <h3 className="text-[17px] font-extrabold text-black tracking-tight">투자 게시판</h3>
-            </div>
-            <div className="flex gap-1.5">
-              <TabBtn active={tab === "feed"} onClick={() => setTab("feed")} icon={Rss} label="피드" />
-              <TabBtn active={tab === "emotion"} onClick={() => setTab("emotion")} icon={Activity} label="감정" />
-            </div>
-          </div>
-
-          {tab === "feed" ? (
-            <FeedTab
-              posts={posts}
-              latestEvent={latestEvent}
-              priorEvents={priorEvents}
-              currentRound={currentRound}
-              expanded={expanded}
-              toggleExpand={toggleExpand}
-              hasNewComments={hasNewComments}
-              bumpedLike={bumpedLike}
-              bumpedComment={bumpedComment}
-              agents={agents}
-              snsAgents={snsAgents}
-              onVote={onVote}
-              onPost={onPost}
-              onRequestEvent={onRequestEvent}
-            />
-          ) : (
-            <EmotionTab agents={agents} snsAgents={snsAgents} deltas={emotionDeltas} />
-          )}
-
-          {/* Home indicator */}
-          <div className="flex justify-center py-2 bg-pixel-wall">
-            <div className="w-[110px] h-[5px] rounded-full bg-pixel-ink/40" />
-          </div>
-        </div>
+    <div className="h-full w-full bg-white flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-2.5 bg-pixel-table border-b-2 border-black">
+        <h3 className="text-[17px] font-extrabold text-black tracking-tight">투자 게시판</h3>
       </div>
-    </div>
-  );
-}
 
-/* ── Tabs ── */
-function TabBtn({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ComponentType<any>;
-  label: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1 px-3 py-1 rounded-full border-2 border-black text-[11px] font-bold cursor-pointer transition-colors ${
-        active ? "bg-pixel-grass text-black" : "bg-white text-pixel-muted hover:bg-pixel-path"
-      }`}
-    >
-      <Icon size={12} />
-      {label}
-    </button>
+      <FeedTab
+        posts={posts}
+        latestEvent={latestEvent}
+        priorEvents={priorEvents}
+        currentRound={currentRound}
+        expanded={expanded}
+        toggleExpand={toggleExpand}
+        hasNewComments={hasNewComments}
+        bumpedLike={bumpedLike}
+        bumpedComment={bumpedComment}
+        agents={agents}
+        snsAgents={snsAgents}
+        onVote={onVote}
+        onPost={onPost}
+        onRequestEvent={onRequestEvent}
+      />
+    </div>
   );
 }
 
@@ -767,78 +649,3 @@ function ReplyComposer({
   );
 }
 
-/* ── Emotion tab ── */
-function EmotionTab({
-  agents,
-  snsAgents,
-  deltas,
-}: {
-  agents: Agent[];
-  snsAgents: Agent[];
-  deltas: Record<string, Record<string, number>>;
-}) {
-  const all = [...agents, ...snsAgents];
-  return (
-    <div className="flex-1 overflow-y-auto bg-pixel-wall px-3 py-3 space-y-2.5">
-      {all.length === 0 && (
-        <p className="text-[11px] text-pixel-muted text-center pt-6">
-          이벤트가 시작되면 감정 변화가 표시됩니다
-        </p>
-      )}
-      {all.map((a) => {
-        const Icon = AGENT_ICONS[a.id] || AGENT_ICONS.default;
-        const d = deltas[a.id] || {};
-        const mood = dominantEmotion(a);
-        return (
-          <div key={a.id} className="bg-white border-2 border-black rounded-2xl p-2.5 shadow-pixel-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-7 h-7 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center text-black">
-                <Icon size={13} />
-              </div>
-              <span className="text-[12px] font-bold text-black truncate">{a.alias}</span>
-              {/* 현재 감정: 가장 강한 감정 대표 이모지 (요청 8) */}
-              <span
-                title={`현재 감정: ${mood.label}`}
-                className="flex items-center gap-0.5 text-[9px] font-bold text-pixel-muted px-1.5 py-[1px] rounded-full bg-pixel-path border border-black"
-              >
-                <span className="text-[12px] leading-none">{mood.emoji}</span>
-                {mood.label}
-              </span>
-              <div className="flex-1" />
-              {a.sns_only && (
-                <span className="text-[8px] px-1.5 py-[1px] rounded-full bg-pixel-path border border-black font-bold text-pixel-muted">
-                  관중
-                </span>
-              )}
-            </div>
-            <div className="space-y-1">
-              {EMO_AXES.map((axis) => {
-                const v = Number(a[axis.key] ?? 50);
-                const dv = Number(d[axis.key as string] ?? 0);
-                return (
-                  <div key={axis.key as string} className="flex items-center gap-1.5">
-                    <span className="text-[9px] text-pixel-muted font-bold w-9 shrink-0">{axis.label}</span>
-                    <div className="flex-1 h-1.5 bg-pixel-path rounded-full border border-black overflow-hidden">
-                      <div
-                        className="h-full bg-pixel-grass"
-                        style={{ width: `${Math.max(0, Math.min(100, v))}%` }}
-                      />
-                    </div>
-                    <span className="text-[9px] font-bold text-black w-5 text-right">{Math.round(v)}</span>
-                    <span
-                      className={`text-[9px] font-bold w-7 text-right ${
-                        dv > 0 ? "text-pixel-greenText" : dv < 0 ? "text-pixel-danger" : "text-pixel-muted"
-                      }`}
-                    >
-                      {dv > 0 ? `▲${Math.abs(dv).toFixed(0)}` : dv < 0 ? `▼${Math.abs(dv).toFixed(0)}` : "–"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
