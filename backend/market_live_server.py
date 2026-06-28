@@ -727,6 +727,7 @@ def control_market_event(body: EventBody):
             live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
             try:
                 live.build_timeline()
+                live._progress_queue.append({"phase": "timeline_ready"})
             except Exception as e:
                 print(f"[WARN] build_timeline failed: {e}")
             # Push final state

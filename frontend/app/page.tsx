@@ -105,6 +105,7 @@ export default function Home() {
   // True when user presses "정지" — freezes both the cosmetic timer AND the game loop.
   const [gamePaused, setGamePaused] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimerRef = useRef<(() => void) | null>(null);
   const progressWsRef = useRef<WebSocket | null>(null);
 
   /** Sync comment ID tracking whenever posts are set from any source. */
@@ -156,6 +157,12 @@ export default function Home() {
       if (data.emotion_deltas) setEmotionDeltas(data.emotion_deltas);
       if (data.market) setMarketData(data.market);
       if (data.round_report) setRoundReport(data.round_report);
+      if (data.phase === "timeline_ready") {
+        startTimerRef.current?.();
+        control.run(STEPS_PER_DAY, uid).catch((err) => {
+          console.warn("[MarketAquarium] run after timeline_ready:", err);
+        });
+      }
       if (data.phase === "done") {
         setComputing(false);
         if (data.finished) {
@@ -193,6 +200,7 @@ export default function Home() {
       setClock(t);
     }, 60);
   }, [stopTimer]);
+  startTimerRef.current = startTimer;
 
   useEffect(() => () => stopTimer(), [stopTimer]);
 
@@ -349,17 +357,7 @@ export default function Home() {
           impact: normalizeImpact(res.impact),
           source: "user",
         });
-        // Extract board data from the event response when available
-        const s = (res as any).state;
-        if (s) {
-          if (s.sns_agents) setSnsAgents(s.sns_agents);
-          if (s.emotion_deltas) setEmotionDeltas(s.emotion_deltas);
-        }
-        // Start the cosmetic day clock
-        startTimer();
-        control.run(STEPS_PER_DAY, sessionUid ?? undefined).catch((err) => {
-          console.warn("[MarketAquarium] run after event:", err);
-        });
+        // Timer + movement start when WS sends "timeline_ready"
       })
       .catch((err) => {
         console.warn("[MarketAquarium] marketEvent failed:", err);
