@@ -568,15 +568,22 @@ function SplashScreen({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div
       onClick={onDismiss}
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-[#f5f0e1] cursor-pointer select-none"
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center cursor-pointer select-none"
+      style={{
+        backgroundImage: "url(/assets/bg.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
     >
+      {/* Dim overlay for contrast */}
+      <div className="absolute inset-0 bg-black/40" />
       <img
         src="/img/title_image.png"
         alt="Market Village"
-        className="w-[min(80vw,600px)] animate-pixel-pop"
+        className="relative z-10 w-[min(80vw,600px)] animate-pixel-pop drop-shadow-[0_4px_24px_rgba(0,0,0,0.5)]"
         draggable={false}
       />
-      <p className="mt-8 text-[13px] text-pixel-muted font-pixel animate-pulse">
+      <p className="relative z-10 mt-8 text-[13px] text-white/80 font-pixel animate-pulse">
         화면을 클릭하여 시작
       </p>
     </div>
