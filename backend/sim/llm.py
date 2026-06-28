@@ -191,15 +191,9 @@ def default_client() -> LLMClient:
 # It mirrors the LLM JSON contracts so the FR modules behave identically; the
 # content is template-flavoured by reading persona/impact keywords in the prompt.
 # --------------------------------------------------------------------------- #
-_NEG_WORDS = ["해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산", "하락", "떨어", "약세", "매도", "손실", "적자", "실패", "negative", "hack", "crash", "drop", "fall"]
-_POS_WORDS = ["승인", "상승", "호재", "급등", "유입", "인하", "positive", "approval", "surge", "rally"]
-
-
 def _is_negative(text: str) -> bool:
-    low = text.lower()
-    return any(w in text or w in low for w in _NEG_WORDS) and not any(
-        w in text or w in low for w in _POS_WORDS
-    )
+    from .sentiment import is_negative
+    return is_negative(text)
 
 
 def _agent_type_in_prompt(text: str) -> str:
