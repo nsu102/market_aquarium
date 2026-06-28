@@ -110,6 +110,9 @@ def _stable_int(text: str) -> int:
 # --------------------------------------------------------------------------- #
 # App + shared state
 # --------------------------------------------------------------------------- #
+import logging
+logging.basicConfig(level=logging.INFO)
+
 app = FastAPI(title="Market Aquarium Live")
 
 # Pre-warm the sentiment model so the first event doesn't pay the load cost.
@@ -688,8 +691,18 @@ def control_market_event(body: EventBody):
                 "error": "5 라운드 종료 — 재시작하세요"}
     live.start_market = live.game.market.model_dump()
     live.start_prices = {a.symbol: a.price for a in live.game.assets}
+
+    # Progress callback: push partial state to connected WebSocket clients
+    def _on_progress(phase: str, snapshot: dict):
+        live._progress_queue.append({"phase": phase, **snapshot})
+
+    live._progress_queue = []
+
     try:
-        live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
+        live.game.run_round(
+            body.text, source=body.source, is_rumor=body.is_rumor,
+            on_progress=_on_progress,
+        )
     except RuntimeError as e:
         return {"status": "finished", "round": live.game.round, "error": str(e)}
     except Exception as e:
@@ -874,6 +887,24 @@ def api_env_update(body: StepBody):
     if live is None:
         return {"<step>": -1}
     return live.movement_payload(body.step)
+
+
+@app.websocket("/ws/progress/{uid}")
+async def ws_progress(websocket: WebSocket, uid: str):
+    """Push round progress (SNS posts, trades) as they complete."""
+    await websocket.accept()
+    try:
+        sent = 0
+        while True:
+            live = _get_live(uid)
+            if live and hasattr(live, "_progress_queue"):
+                q = live._progress_queue
+                while sent < len(q):
+                    await websocket.send_json(q[sent])
+                    sent += 1
+            await asyncio.sleep(0.2)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.websocket("/ws/movement/{uid}")

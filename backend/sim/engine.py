@@ -204,6 +204,17 @@ class GameSession:
     def finished(self) -> bool:
         return self.round >= MAX_ROUNDS
 
+    def _progress_snapshot(self, rnd: int) -> dict:
+        """Lightweight snapshot for on_progress callbacks."""
+        return {
+            "round": rnd,
+            "posts": [p.model_dump() for p in self.posts],
+            "agents": [a.model_dump() for a in self.agents],
+            "sns_agents": [a.model_dump() for a in self.sns_agents],
+            "emotion_deltas": self._emotion_deltas(),
+            "market": self.market.model_dump() if self.market else None,
+        }
+
     # ------------------------------------------------------------------ #
     def run_round(
         self,
@@ -213,6 +224,7 @@ class GameSession:
         is_rumor: bool = False,
         cred_source: str | None = None,
         timestamp: str | None = None,
+        on_progress: callable | None = None,
     ) -> RoundReport:
         """Advance one round given the user's single event (FR-1 .. FR-8)."""
         if self.finished:
@@ -297,6 +309,8 @@ class GameSession:
         with ThreadPoolExecutor(max_workers=8) as ex:
             for ag, result in ex.map(_open, openers):
                 sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
+        if on_progress:
+            on_progress("sns_phase1", self._progress_snapshot(rnd))
 
         # Phase 2: remaining agents + sns spectators decide in parallel
         rest_agents = self.agents[2:]
@@ -307,9 +321,11 @@ class GameSession:
                 interests=interests, sectors=sectors, post_only=False,
                 min_round_threads=min_threads, max_round_threads=max_threads,
             )
+        # SNS spectators use scripted client (no LLM) — they're NPCs
+        _scripted = scripted_client()
         def _write_sns(ag):
             return ag, sns.view_sns(
-                self.client, ag, event, self.posts, rnd, timestamp=ts, force=True,
+                _scripted, ag, event, self.posts, rnd, timestamp=ts, force=True,
                 min_round_threads=min_threads, max_round_threads=max_threads,
             )
         with ThreadPoolExecutor(max_workers=8) as ex:
@@ -318,6 +334,8 @@ class GameSession:
         for ag, result in futs_agents + futs_sns:
             sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
         _log.info("sns_write (%d total): %.2fs", total_writers, time.monotonic() - _t2)
+        if on_progress:
+            on_progress("sns_done", self._progress_snapshot(rnd))
 
         # SNS spectators cast their like/dislike votes on this round's posts.
         vote_events = self._cast_sns_votes(rnd)

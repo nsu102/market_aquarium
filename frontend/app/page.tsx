@@ -105,6 +105,7 @@ export default function Home() {
   // True when user presses "정지" — freezes both the cosmetic timer AND the game loop.
   const [gamePaused, setGamePaused] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressWsRef = useRef<WebSocket | null>(null);
 
   /** Sync comment ID tracking whenever posts are set from any source. */
   const syncPosts = useCallback((newPosts: Post[]) => {
@@ -123,6 +124,41 @@ export default function Home() {
     const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
     setActivityLog((prev) => [...prev.slice(-99), { id, time, text }]);
   }, []);
+
+  /** Connect to progress WebSocket for real-time SNS updates during rounds. */
+  const connectProgress = useCallback((uid: string) => {
+    if (progressWsRef.current) {
+      progressWsRef.current.close();
+      progressWsRef.current = null;
+    }
+    const wsBase = (process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000").replace(/^http/, "ws");
+    const ws = new WebSocket(`${wsBase}/ws/progress/${uid}`);
+    ws.onmessage = (ev) => {
+      const data = JSON.parse(ev.data);
+      if (data.posts) {
+        const incoming = data.posts as Post[];
+        const newPosts = incoming.slice(prevPostCountRef.current);
+        for (const p of newPosts) {
+          pushLog(`${p.agentAlias}가 게시판에 글을 남겼습니다`);
+        }
+        for (const p of incoming) {
+          for (const c of p.comments ?? []) {
+            if (c.id && !prevCommentIdsRef.current.has(c.id)) {
+              prevCommentIdsRef.current.add(c.id);
+              pushLog(`${c.agentAlias}가 댓글을 남겼습니다`);
+            }
+          }
+        }
+        syncPosts(incoming);
+      }
+      if (data.agents) setAgents(data.agents);
+      if (data.sns_agents) setSnsAgents(data.sns_agents);
+      if (data.emotion_deltas) setEmotionDeltas(data.emotion_deltas);
+      if (data.market) setMarketData(data.market);
+    };
+    ws.onerror = () => ws.close();
+    progressWsRef.current = ws;
+  }, [pushLog, syncPosts]);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -295,6 +331,8 @@ export default function Home() {
     setNeedEvent(false);
     setComputing(true);
     pushLog(`이벤트 발생: ${text}`);
+    // Connect progress WebSocket to receive SNS updates in real-time
+    if (sessionUid) connectProgress(sessionUid);
     control
       .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
       .then((res) => {
