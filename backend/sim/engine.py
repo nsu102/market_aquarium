@@ -66,16 +66,13 @@ def _plan_for(agent: Agent) -> str:
     return _PLAN_TEMPLATES.get(agent.type, "게시판 확인 → 거래소에서 매매 판단")
 
 
-def classify_impact(text: str) -> EventImpact:
-    """Cheap keyword heuristic so a bare event text gets a sane base shock.
-
-    Used only when the caller does not specify an impact. Real impact is shaped
-    by agent emotion/trades on top of this.
-    """
+def _keyword_classify(text: str) -> EventImpact | None:
+    """Fast keyword fallback — returns None if no keyword matches."""
     neg = [
         "해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산",
         "악재", "악제", "장애", "중단", "다운", "소송", "유출",
-        "hack", "crash", "ban", "war", "outage", "halt", "lawsuit",
+        "하락", "떨어", "약세", "매도", "손실", "적자", "실패",
+        "hack", "crash", "ban", "war", "outage", "halt", "lawsuit", "drop", "fall",
     ]
     pos = ["승인", "상승", "호재", "급등", "유입", "인하", "etf", "approval", "surge", "rally"]
     low = text.lower()
@@ -83,7 +80,46 @@ def classify_impact(text: str) -> EventImpact:
         return EventImpact.NEGATIVE
     if any(k in text or k in low for k in pos):
         return EventImpact.POSITIVE
-    return EventImpact.NEUTRAL
+    return None
+
+
+# ponytail: lazy-load the model once, only when actually needed
+_sentiment_pipeline = None
+
+
+def _get_sentiment_pipeline():
+    global _sentiment_pipeline
+    if _sentiment_pipeline is None:
+        try:
+            from transformers import pipeline
+            _sentiment_pipeline = pipeline(
+                "text-classification", model="snunlp/KR-FinBert-SC"
+            )
+        except Exception:
+            _sentiment_pipeline = False  # mark as unavailable
+    return _sentiment_pipeline if _sentiment_pipeline else None
+
+
+_FINBERT_MAP = {
+    "negative": EventImpact.NEGATIVE,
+    "positive": EventImpact.POSITIVE,
+    "neutral": EventImpact.NEUTRAL,
+}
+
+
+def classify_impact(text: str) -> EventImpact:
+    """KR-FinBert-SC first, keyword fallback for short/ambiguous user inputs."""
+    pipe = _get_sentiment_pipeline()
+    if pipe is not None:
+        try:
+            result = pipe(text[:512])[0]
+            if result["score"] >= 0.75 and result["label"] != "neutral":
+                return _FINBERT_MAP[result["label"]]
+        except Exception:
+            pass
+    # Model returned neutral or unavailable — keywords catch short user inputs
+    kw = _keyword_classify(text)
+    return kw if kw is not None else EventImpact.NEUTRAL
 
 
 class GameSession:

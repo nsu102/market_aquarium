@@ -30,7 +30,10 @@ from typing import Any, Callable
 if not os.getenv("MARKET_DISABLE_LLM"):
     try:
         from dotenv import load_dotenv
-        load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+        _sim_dir = Path(__file__).resolve().parents[2]
+        # Try project root first, then backend/
+        load_dotenv(_sim_dir / ".env", override=True)
+        load_dotenv(_sim_dir / "backend" / ".env", override=True)
     except Exception:
         pass
 
@@ -188,7 +191,7 @@ def default_client() -> LLMClient:
 # It mirrors the LLM JSON contracts so the FR modules behave identically; the
 # content is template-flavoured by reading persona/impact keywords in the prompt.
 # --------------------------------------------------------------------------- #
-_NEG_WORDS = ["해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산", "negative", "hack", "crash"]
+_NEG_WORDS = ["해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산", "하락", "떨어", "약세", "매도", "손실", "적자", "실패", "negative", "hack", "crash", "drop", "fall"]
 _POS_WORDS = ["승인", "상승", "호재", "급등", "유입", "인하", "positive", "approval", "surge", "rally"]
 
 
