@@ -4,14 +4,19 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Trophy } from "lucide-react";
 import PixelModal from "@/components/pixel/PixelModal";
-import type { OverallAchievement } from "@/lib/control";
+import BranchMap from "@/components/BranchMap";
+import type { OverallAchievement, EndingResult } from "@/lib/control";
 
-/** FR-9/FR-10: end-of-game (5 rounds) overall report + achievements modal. */
+/** FR-9/FR-10/FR-Branch: end-of-game overall report + endings + achievements. */
 export default function OverallReport({
   report,
   onClose,
 }: {
-  report: { markdown: string; achievements: OverallAchievement[] };
+  report: {
+    markdown: string;
+    achievements: OverallAchievement[];
+    endings?: EndingResult[];
+  };
   onClose: () => void;
 }) {
   return (
@@ -22,6 +27,7 @@ export default function OverallReport({
       title="게임 종합 리포트"
       headerIcon={<Trophy size={15} className="text-black" />}
     >
+      <BranchMap endings={report.endings ?? []} />
       {report.achievements && report.achievements.length > 0 && (
         <div className="mb-4 grid gap-2">
           {report.achievements.map((a, i) => (

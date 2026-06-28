@@ -16,6 +16,7 @@ import { Post } from "@/mock_data/posts";
 import { GameEvent } from "@/mock_data/events";
 import type { Scenario } from "@/lib/timeline";
 import type { RoundReportMeta } from "@/lib/reverieApi";
+import { EventCard } from "@/constants/cards";
 
 export const CONTROL_BASE =
   process.env.NEXT_PUBLIC_CONTROL_BASE?.replace(/\/$/, "") ||
@@ -94,6 +95,20 @@ export interface MarketEventInput {
   uid?: string;
   text: string;
   is_rumor?: boolean;
+  // FR-Branch: set when the player picks a card (vs the free-text wildcard).
+  card_id?: string;
+  impact?: "positive" | "negative" | "neutral";
+  base_shock?: number;
+}
+
+export interface CardsResponse {
+  ready: boolean;
+  finished?: boolean;
+  round?: number;
+  wildcard?: boolean;
+  cards?: EventCard[];
+  /** Cards the previous pick locked — shown greyed/disabled in the picker. */
+  locked?: EventCard[];
 }
 
 /* ── Core request helper ── */
@@ -188,7 +203,7 @@ export function run(count: number, uid?: string): Promise<RunResponse> {
   return postJson<RunResponse>("/control/run", { uid, count });
 }
 
-/** Inject the round's global event (FR-1). */
+/** Inject the round's global event (FR-1). A card adds impact + base_shock. */
 export function marketEvent(
   input: MarketEventInput
 ): Promise<MarketEventResponse> {
@@ -196,7 +211,16 @@ export function marketEvent(
     uid: input.uid,
     text: input.text,
     is_rumor: input.is_rumor ?? false,
+    card_id: input.card_id ?? null,
+    impact: input.impact ?? null,
+    base_shock: input.base_shock ?? null,
   });
+}
+
+/** FR-Branch: the choice cards for the upcoming round (+ wildcard slot). */
+export function getCards(uid?: string): Promise<CardsResponse> {
+  const q = uid ? `?uid=${uid}` : "";
+  return getJson<CardsResponse>(`/control/cards${q}`);
 }
 
 /** Snapshot of the current market state (ready=false before the sim starts). */
@@ -210,12 +234,23 @@ export interface OverallAchievement {
   title: string;
   description: string;
 }
+export interface EndingResult {
+  agent_id: string;
+  agent_alias: string;
+  agent_type: string;
+  ending_id: string;
+  title: string;
+  description: string;
+  ghost_text: string;
+  persona_mutation: Record<string, unknown>;
+}
 export interface OverallReportResponse {
   ready: boolean;
   finished?: boolean;
   report?: {
     markdown: string;
     achievements: OverallAchievement[];
+    endings: EndingResult[];
     rounds: unknown[];
   };
 }

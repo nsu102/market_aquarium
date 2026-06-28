@@ -89,6 +89,7 @@ export default function Home() {
   const [overall, setOverall] = useState<{
     markdown: string;
     achievements: control.OverallAchievement[];
+    endings: control.EndingResult[];
   } | null>(null);
   const overallFetchedRef = useRef(false);
 
@@ -252,11 +253,12 @@ export default function Home() {
     }
   }, [sessionUid]);
 
-  const handleEvent = useCallback((text: string) => {
+  const handleEvent = useCallback((input: control.MarketEventInput) => {
+    const text = input.text;
     setNeedEvent(false);
     setComputing(true);
     control
-      .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
+      .marketEvent({ ...input, uid: sessionUid ?? undefined })
       .then((res) => {
         setActiveEvent({
           text,
@@ -415,6 +417,7 @@ export default function Home() {
 
           <GameHUD
             round={currentRound}
+            uid={sessionUid ?? undefined}
             clock={formatClock(clock)}
             playing={playing}
             onEvent={handleEvent}
