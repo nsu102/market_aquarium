@@ -2,7 +2,9 @@
 
 import { useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import MarketPanel from "@/components/MarketPanel";
+import AgentSidebar from "@/components/AgentSidebar";
+import AssetTicker from "@/components/AssetTicker";
+import AssetModal from "@/components/AssetModal";
 import BoardFeed from "@/components/BoardFeed";
 import RoundReport from "@/components/RoundReport";
 import OverallReport from "@/components/OverallReport";
@@ -19,6 +21,7 @@ import * as control from "@/lib/control";
 import { Loader2 } from "lucide-react";
 import type { ReverieMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
+import type { TradeAction } from "@/constants/trade";
 
 // Canonical Phaser viewer is client-only (loads Phaser + the_ville assets).
 const ReverieGame = dynamic(() => import("@/components/ReverieGame"), {
@@ -60,7 +63,12 @@ export default function Home() {
   const [boardOpen, setBoardOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
+  // Transient per-agent trade alerts for the dock (agent.id -> action), set on a
+  // live trade and cleared after a short hold.
+  const [tradeAlerts, setTradeAlerts] = useState<Record<string, TradeAction>>({});
+  const tradeAlertTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -256,6 +264,28 @@ export default function Home() {
     [agents]
   );
 
+  /** A persona traded at the exchange this step -> flash a dock alert. */
+  const handleAgentTrade = useCallback(
+    (original: string, action: TradeAction) => {
+      const underscore = original.replace(/ /g, "_");
+      const a = agents.find(
+        (x) => x.sprite?.includes(underscore) || x.alias === original
+      );
+      if (!a) return;
+      const id = a.id;
+      setTradeAlerts((prev) => ({ ...prev, [id]: action }));
+      clearTimeout(tradeAlertTimers.current[id]);
+      tradeAlertTimers.current[id] = setTimeout(() => {
+        setTradeAlerts((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, 2600);
+    },
+    [agents]
+  );
+
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} onResume={handleResume} />;
   }
@@ -273,59 +303,63 @@ export default function Home() {
     : { round: currentRound, markdown: mockReport.markdown };
 
   return (
-    <div className="h-screen w-screen relative overflow-hidden bg-surface-primary">
-      {/* Full-screen game map (canonical reverie viewer) */}
-      <div className="absolute inset-0">
-        {canonicalSim ? (
-          <ReverieGame
-            simCode={canonicalSim}
-            uid={sessionUid ?? undefined}
-            onTick={handleTick}
-            controlsRef={reverieControlsRef}
-            onSelectAgent={handleSelectAgent}
-            onRoundEnd={handleRoundEnd}
-          />
-        ) : (
-          <div className="h-full w-full flex items-center justify-center bg-white text-pixel-muted text-sm font-bold animate-pulse-soft">
-            라이브 시뮬레이션을 준비하는 중...
-          </div>
-        )}
+    <div className="h-screen w-screen flex overflow-hidden bg-surface-primary">
+      {/* Left sidebar + center map + bottom dock */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Main view: full-width map with overlays anchored on top */}
+        <div className="flex-1 flex min-h-0">
+          <main className="relative flex-1 min-w-0">
+            {canonicalSim ? (
+              <ReverieGame
+                simCode={canonicalSim}
+                uid={sessionUid ?? undefined}
+                onTick={handleTick}
+                controlsRef={reverieControlsRef}
+                onSelectAgent={handleSelectAgent}
+                onRoundEnd={handleRoundEnd}
+                onAgentTrade={handleAgentTrade}
+              />
+            ) : (
+              <div className="h-full w-full flex items-center justify-center bg-white text-pixel-muted text-sm font-bold animate-pulse-soft">
+                라이브 시뮬레이션을 준비하는 중...
+              </div>
+            )}
+
+            {/* Discord-style voice overlay roster (floats over the map, top-left) */}
+            {marketOpen && (
+              <div className="absolute top-14 left-2 z-30 w-[260px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1">
+                <AgentSidebar agents={agents} alerts={tradeAlerts} onSelect={setSelectedAgent} />
+              </div>
+            )}
+
+            <GameHUD
+              round={currentRound}
+              onEvent={handleEvent}
+              marketOpen={marketOpen}
+              boardOpen={boardOpen}
+              onToggleMarket={() => setMarketOpen(!marketOpen)}
+              onToggleBoard={() => setBoardOpen(!boardOpen)}
+              onToggleReport={handleToggleReport}
+              reportOpen={reportOpen}
+              marketNotifications={events.length}
+              boardNotifications={posts.length}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onKeyboardEnabled={handleKeyboardEnabled}
+              forceEventOpen={needEvent}
+            />
+          </main>
+        </div>
+
+        {/* Bottom dock: market price ticker */}
+        <AssetTicker assets={marketData?.assets ?? []} onSelect={setSelectedAsset} />
       </div>
 
-      {/* HUD overlay */}
-      <GameHUD
-        round={currentRound}
-        onEvent={handleEvent}
-        marketOpen={marketOpen}
-        boardOpen={boardOpen}
-        onToggleMarket={() => setMarketOpen(!marketOpen)}
-        onToggleBoard={() => setBoardOpen(!boardOpen)}
-        onToggleReport={handleToggleReport}
-        reportOpen={reportOpen}
-        marketNotifications={events.length}
-        boardNotifications={posts.length}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onKeyboardEnabled={handleKeyboardEnabled}
-        forceEventOpen={needEvent}
-      />
-
-      {/* Market panel - floating left, content-fit */}
-      {marketOpen && marketData && (
-        <div className="absolute left-4 top-16 w-[300px] z-20 max-h-[calc(100vh-7rem)]">
-          <div className="bg-pixel-wall border-2 border-black rounded-2xl shadow-pixel-lg overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]">
-            <MarketPanel data={marketData} />
-          </div>
-        </div>
-      )}
-
-      {/* Board feed - floating right */}
+      {/* Right column: board feed, full height */}
       {boardOpen && (
-        <div className="absolute right-4 top-16 bottom-16 w-[370px] z-20">
-          <div className="h-full overflow-hidden">
-            <BoardFeed posts={posts} events={events} />
-          </div>
-        </div>
+        <aside className="w-[370px] shrink-0 border-l-2 border-black overflow-hidden">
+          <BoardFeed posts={posts} events={events} />
+        </aside>
       )}
 
       {/* Round report - center modal */}
@@ -353,6 +387,10 @@ export default function Home() {
 
       {selectedAgent && (
         <AgentDetail agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
+      )}
+
+      {selectedAsset && (
+        <AssetModal asset={selectedAsset} onClose={() => setSelectedAsset(null)} />
       )}
 
       {activeEvent && (
