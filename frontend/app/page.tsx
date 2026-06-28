@@ -96,6 +96,7 @@ export default function Home() {
   const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
   const prevPostCountRef = useRef(0);
+  const prevCommentIdsRef = useRef<Set<string>>(new Set());
 
   // --- Cosmetic day clock (UI only, does not drive data) ---
   const [clock, setClock] = useState(0);
@@ -237,12 +238,21 @@ export default function Home() {
   const handleTick = useCallback((meta: ReverieMeta) => {
     if (meta.market) setMarketData(meta.market);
     if (meta.posts) {
-      // Generate log entries for new posts
+      // Log new posts
       const newPosts = meta.posts.slice(prevPostCountRef.current);
       for (const p of newPosts) {
         pushLog(`${p.agentAlias}가 게시판에 글을 남겼습니다`);
       }
       prevPostCountRef.current = meta.posts.length;
+      // Log new comments
+      for (const p of meta.posts) {
+        for (const c of p.comments ?? []) {
+          if (c.id && !prevCommentIdsRef.current.has(c.id)) {
+            prevCommentIdsRef.current.add(c.id);
+            pushLog(`${c.agentAlias}가 댓글을 남겼습니다`);
+          }
+        }
+      }
       setPosts(meta.posts);
     }
     if (meta.events) setEvents(meta.events);
