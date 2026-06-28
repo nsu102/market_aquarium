@@ -59,6 +59,8 @@ export interface GameControls {
   zoomOut: () => void;
   /** Disable/enable keyboard camera controls (e.g. while typing in an input). */
   setKeyboardEnabled: (on: boolean) => void;
+  /** Optional: focus a random NPC (called from page.tsx; no-op if unimplemented). */
+  focusAgent?: () => void;
 }
 
 interface Props {

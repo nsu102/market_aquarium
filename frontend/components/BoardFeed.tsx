@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
 import { getProfileImg } from "@/lib/profileImg";
+import { PICKUP_LINES } from "@/constants/dating";
 
 interface BoardComposeInput {
   text: string;
@@ -153,8 +154,9 @@ export default function BoardFeed({
   return (
     <div className="h-full w-full bg-white flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-2.5 bg-pixel-table border-b-2 border-black">
-        <h3 className="text-[17px] font-extrabold text-black tracking-tight">투자 게시판</h3>
+      <div className="px-4 py-2.5 bg-pixel-table border-b-2 border-black flex items-center gap-1.5">
+        <Heart size={15} className="text-pixel-danger" fill="currentColor" />
+        <h3 className="text-[17px] font-extrabold text-black tracking-tight">연애 작업실</h3>
       </div>
 
       <FeedTab
@@ -552,13 +554,27 @@ function Composer({
   };
 
   return (
-    <div className="px-3 py-2 bg-white border-t-2 border-black flex items-center gap-1.5">
+    <div className="bg-white border-t-2 border-black">
+      {/* 작업 멘트 프리셋 — 클릭하면 입력창에 채워짐 (상대를 지정하면 그 사람이 즉답) */}
+      <div className="flex gap-1.5 px-3 pt-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+        {PICKUP_LINES.map((line, i) => (
+          <button
+            key={i}
+            onClick={() => setText(line)}
+            title={line}
+            className="shrink-0 text-[10px] font-bold text-black bg-pixel-path border-2 border-black rounded-full px-2.5 py-[3px] cursor-pointer hover:bg-pixel-grass whitespace-nowrap max-w-[180px] truncate"
+          >
+            {line}
+          </button>
+        ))}
+      </div>
+      <div className="px-3 py-2 flex items-center gap-1.5">
       <MentionPicker mentionList={mentionList} value={mentionId} onChange={(id) => setMentionId(id)} />
       <input
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
-        placeholder="한마디 남기기..."
+        placeholder="작업 멘트 입력... (상대 지정 시 즉답)"
         className="flex-1 min-w-0 bg-white border-2 border-black rounded-lg px-2.5 h-8 text-[12px] text-black placeholder:text-pixel-muted focus:outline-none focus:bg-pixel-path"
       />
       <button
@@ -569,6 +585,7 @@ function Composer({
       >
         <Send size={13} />
       </button>
+      </div>
     </div>
   );
 }

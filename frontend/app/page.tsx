@@ -11,6 +11,9 @@ import OverallReport from "@/components/OverallReport";
 import AgentDetail from "@/components/AgentDetail";
 import EventOverlay from "@/components/EventOverlay";
 import SetupScreen from "@/components/SetupScreen";
+import SuitorIntro from "@/components/SuitorIntro";
+import ProposeModal from "@/components/ProposeModal";
+import DatingEnding from "@/components/DatingEnding";
 import GameHUD from "@/components/GameHUD";
 import ActivityLog, { type LogEntry } from "@/components/ActivityLog";
 import { Agent } from "@/mock_data/agents";
@@ -25,6 +28,7 @@ import type { ReverieMeta, RoundReportMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
 import type { TradeAction } from "@/constants/trade";
 import { formatClock, ROUND_MINUTES, ROUND_REAL_MS } from "@/lib/timeline";
+import { Player, DEFAULT_PLAYER, priceMapFromAssets, snapshotTotals } from "@/constants/dating";
 
 // Canonical Phaser viewer is client-only (loads Phaser + the_ville assets).
 const ReverieGame = dynamic(() => import("@/components/ReverieGame"), {
@@ -94,6 +98,13 @@ export default function Home() {
   } | null>(null);
   const overallFetchedRef = useRef(false);
   const [gameFinished, setGameFinished] = useState(false);
+  // --- 미연시 피벗 상태 ---
+  const [player, setPlayer] = useState<Player>(DEFAULT_PLAYER);
+  const [showIntro, setShowIntro] = useState(false); // 시작 직후 맞선 포트폴리오 공개
+  // 시작 시점 에이전트별 총자산 스냅샷(수익률 계산 기준).
+  const initialTotalsRef = useRef<Record<string, number>>({});
+  const [proposedId, setProposedId] = useState<string | null>(null); // 결혼 상대
+  const [showFullReport, setShowFullReport] = useState(false); // 상세 종합 리포트 열림
   const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
   const prevPostCountRef = useRef(0);
@@ -175,13 +186,19 @@ export default function Home() {
   }, []);
 
   const handleStart = useCallback(
-    (setupAgents: Agent[], setupAssets: Asset[], presetIndices?: Record<string, number>) => {
+    (setupAgents: Agent[], setupAssets: Asset[], presetIndices?: Record<string, number>, setupPlayer?: Player) => {
       seedFromSetup(setupAgents, setupAssets);
       setCanonicalSim(null);
       setGameStarted(true);
       setRoundReport(null);
       setOverall(null);
       overallFetchedRef.current = false;
+      // 미연시: 플레이어 + 시작 시점 총자산 스냅샷 + 맞선 인트로
+      if (setupPlayer) setPlayer(setupPlayer);
+      initialTotalsRef.current = snapshotTotals(setupAgents, priceMapFromAssets(setupAssets));
+      setProposedId(null);
+      setShowFullReport(false);
+      setShowIntro(true);
 
       const sim = `market_${Date.now()}`;
       control
@@ -311,7 +328,7 @@ export default function Home() {
         }
         // Start the cosmetic day clock + focus a random NPC
         startTimer();
-        reverieControlsRef.current?.focusAgent();
+        reverieControlsRef.current?.focusAgent?.();
         control.run(STEPS_PER_DAY, sessionUid ?? undefined).catch((err) => {
           console.warn("[MarketAquarium] run after event:", err);
         });
@@ -528,13 +545,48 @@ export default function Home() {
         </div>
       )}
 
-      {/* End-of-game (5 rounds) overall report + achievements */}
-      {overall && (
+      {/* 미연시: 시작 직후 맞선 상대 포트폴리오 공개 */}
+      {showIntro && agents.length > 0 && (
+        <SuitorIntro
+          agents={agents}
+          assets={marketData?.assets}
+          player={player}
+          onClose={() => setShowIntro(false)}
+        />
+      )}
+
+      {/* 미연시: 게임 종료 → 종합(엔딩) 리포트 전에 프로포즈 */}
+      {gameFinished && !proposedId && (
+        <ProposeModal
+          agents={agents}
+          player={player}
+          onPropose={(id) => setProposedId(id)}
+        />
+      )}
+
+      {/* 미연시: 결혼 엔딩(배우자 수익률 = 점수) */}
+      {proposedId && (() => {
+        const spouse = agents.find((a) => a.id === proposedId);
+        if (!spouse) return null;
+        return (
+          <DatingEnding
+            spouse={spouse}
+            player={player}
+            assets={marketData?.assets}
+            initialTotal={initialTotalsRef.current[spouse.id]}
+            onViewReport={overall ? () => setShowFullReport(true) : undefined}
+            onRestart={() => window.location.reload()}
+          />
+        );
+      })()}
+
+      {/* End-of-game overall report + achievements (상세, 엔딩에서 열람) */}
+      {overall && showFullReport && (
         <OverallReport
           report={overall}
           agents={agents}
           activityLog={activityLog}
-          onClose={() => setOverall(null)}
+          onClose={() => setShowFullReport(false)}
         />
       )}
 

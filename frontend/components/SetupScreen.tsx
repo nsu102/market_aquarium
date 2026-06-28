@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Agent } from "@/mock_data/agents";
 import { Asset } from "@/mock_data/market";
 import { AGENT_PROFILES, DEFAULT_ASSETS, CHARACTER_POOL, CUSTOM_COLORS } from "@/constants/agentProfiles";
+import { Player, avatarProfileSrc } from "@/constants/dating";
 import { seedPriceHistory } from "@/utils/sparkline";
 import {
   Play,
@@ -26,6 +27,7 @@ import {
   TrendingUp,
   Trash2,
   UserPlus,
+  Heart,
 } from "lucide-react";
 import { filterNumeric, filterInt, formatKRW } from "@/utils/numberInput";
 import PixelButton from "@/components/pixel/PixelButton";
@@ -50,7 +52,7 @@ interface SetupAgent {
 }
 
 interface Props {
-  onStart: (agents: Agent[], assets: Asset[], presetIndices?: Record<string, number>) => void;
+  onStart: (agents: Agent[], assets: Asset[], presetIndices?: Record<string, number>, player?: Player) => void;
   onResume?: () => void;
 }
 
@@ -75,6 +77,12 @@ export default function SetupScreen({ onStart, onResume }: Props) {
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [presets, setPresets] = useState<PresetsMap | null>(null);
   const [presetIndices, setPresetIndices] = useState<Record<string, number>>({});
+  // 플레이어(공략 주체) — 이름 + 아바타. 대화 UI/엔딩 표시에만 쓰임.
+  const [playerName, setPlayerName] = useState("");
+  const [playerAvatarIdx, setPlayerAvatarIdx] = useState(15); // Isabella_Rodriguez 근처
+  const playerAvatar = CHARACTER_POOL[playerAvatarIdx % CHARACTER_POOL.length].name;
+  const cyclePlayerAvatar = (dir: -1 | 1) =>
+    setPlayerAvatarIdx((i) => (i + dir + CHARACTER_POOL.length) % CHARACTER_POOL.length);
 
   useEffect(() => {
     setHasSavedSession(!!loadSessionUid());
@@ -228,7 +236,8 @@ export default function SetupScreen({ onStart, onResume }: Props) {
       symbol: a.symbol, name: a.name, price: a.price, change24h: 0, volume: 0,
       priceHistory: seedPriceHistory(a.symbol, a.price),
     }));
-    onStart(finalAgents, finalAssets, Object.keys(presetIndices).length > 0 ? presetIndices : undefined);
+    const player: Player = { name: playerName.trim() || "나", avatar: playerAvatar };
+    onStart(finalAgents, finalAssets, Object.keys(presetIndices).length > 0 ? presetIndices : undefined, player);
   };
 
   const totalValue = useMemo(() => {
@@ -261,6 +270,31 @@ export default function SetupScreen({ onStart, onResume }: Props) {
           <span className="text-[10px] text-black font-bold">
             {enabledAgents.length} / {agents.length}
           </span>
+        </div>
+
+        {/* Player strip — 공략 주체(미연시 주인공) 설정 */}
+        <div className="flex items-center gap-3 px-4 py-2 bg-pixel-wall border-b-2 border-black flex-shrink-0">
+          <span className="text-[10px] font-extrabold text-pixel-danger tracking-wider flex items-center gap-1">
+            <Heart size={11} fill="currentColor" /> 나의 캐릭터
+          </span>
+          <button onClick={() => cyclePlayerAvatar(-1)} aria-label="이전 아바타" className="text-pixel-muted hover:text-black cursor-pointer">
+            <ChevronLeft size={14} />
+          </button>
+          <div className="w-9 h-9 border-2 border-black rounded-lg bg-white overflow-hidden flex items-center justify-center flex-shrink-0">
+            <Image src={avatarProfileSrc(playerAvatar)} alt="" width={28} height={28} style={{ imageRendering: "pixelated" }} />
+          </div>
+          <button onClick={() => cyclePlayerAvatar(1)} aria-label="다음 아바타" className="text-pixel-muted hover:text-black cursor-pointer">
+            <ChevronRight size={14} />
+          </button>
+          <input
+            type="text"
+            value={playerName}
+            onChange={(e) => setPlayerName(e.target.value)}
+            placeholder="이름 입력 (예: 김코인)"
+            maxLength={12}
+            className="flex-1 max-w-[220px] text-[12px] font-bold text-black bg-white border-2 border-black rounded-lg px-2.5 py-[5px] focus:outline-none focus:bg-pixel-path"
+          />
+          <span className="text-[9px] text-pixel-muted">맞선 상대들과 연애대화로 감정을 흔들어 보세요</span>
         </div>
 
         {/* Body */}
