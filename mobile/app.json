@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Market Aquarium",
+    "slug": "market-aquarium",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "bundleIdentifier": "com.marketaquarium.mobile",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.marketaquarium.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    }
+  }
+}

@@ -34,7 +34,9 @@ _REPO = normpath(join(_HERE, ".."))           # repo root
 sys.path.insert(0, _HERE)                     # maze / path_finder / utils (local)
 sys.path.insert(0, _REPO)                     # backend.sim
 
-from fastapi import FastAPI  # noqa: E402
+import asyncio  # noqa: E402
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -44,22 +46,17 @@ from path_finder import path_finder  # noqa: E402  (path util)
 from utils import collision_block_id  # noqa: E402  (config)
 
 from backend.sim.engine import GameSession  # noqa: E402
+from backend.sim.models import Asset  # noqa: E402
+
+# ponytail: lazy import — listup is at repo root, imported at runtime only
+sys.path.insert(0, _REPO)
 
 # --------------------------------------------------------------------------- #
 # the_ville location mapping (use existing places).
 # --------------------------------------------------------------------------- #
-BOARD_ADDR = "the Ville:Hobbs Cafe:cafe:cafe customer seating"        # 게시판
-EXCHANGE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 거래소
-
-# Daily-life stops sprinkled between the mandatory board/exchange visits.
-DAILY_SPOTS = [
-    ("공원에서 산책", "the Ville:Johnson Park:park:park garden"),
-    ("도서관에서 자료 조사", "the Ville:Oak Hill College:library:library table"),
-    ("펍에서 한 잔", "the Ville:The Rose and Crown Pub:pub:bar customer seating"),
-    ("공용 공간에서 잡담", "the Ville:artist's co-living space:common room:common room sofa"),
-    ("마트 구경", "the Ville:Harvey Oak Supply Store:supply store:supply store product shelf"),
-    ("카페에서 커피 한 잔", "the Ville:Hobbs Cafe:cafe:piano"),
-]
+BOARD_TILE = (32, 45)  # 게시판
+EXCHANGE_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 거래소 (기존 게시판 위치)
+CAFE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 카페 (기존 거래소 위치)
 
 FORK_ENV0 = join(
     _REPO, "environment", "frontend_server", "storage",
@@ -100,9 +97,9 @@ def _maze() -> Maze:
 class Live:
     """Holds one live game: the engine session + the current movement timeline."""
 
-    def __init__(self, sim_code: str):
+    def __init__(self, sim_code: str, assets=None, seed: int = 42):
         self.sim_code = sim_code
-        self.game = GameSession()
+        self.game = GameSession(assets=assets, seed=seed)
         self.homes = self._load_homes()  # original name -> (x, y)
         # engine agent -> reverie persona (original/underscore) via sprite filename
         self.persona = []  # list of {agent, original, underscore, initial, home}
@@ -167,35 +164,49 @@ class Live:
         self.exchange_arrival: dict[str, int] = {}
         actions = {a["agent_id"]: a for a in self.game.last_round_actions}
         rng = random.Random(self.game.seed + self.game.round)
-        board_t = self._tile_for(BOARD_ADDR)
+        board_t = BOARD_TILE
         exch_t = self._tile_for(EXCHANGE_ADDR)
+        cafe_t = self._tile_for(CAFE_ADDR)
 
         per_agent_frames: dict[str, list] = {}
         for p in self.persona:
             ag = p["agent"]
             act = actions.get(ag.id, {})
             home = p["home"]
-            # Per-agent RNG so each persona's TIMING differs: a different start
-            # delay (idle at home) and different linger at each stop means each one
-            # reaches the board / exchange at a different step ("누가 언제 갔는가").
+            # Per-agent RNG for staggered timing.
             arng = random.Random((hash(ag.id) & 0xFFFFFFFF) ^ (self.game.round * 2654435761))
-            start_delay = arng.randint(0, 70)
-            # three random daily-life stops: before board, between board & exchange,
-            # and between exchange & home.
-            spots = arng.sample(DAILY_SPOTS, 3)
+            start_delay = arng.randint(0, 40)
             board_label = "게시판에 글 작성" if act.get("posted") else "게시판에서 분위기 확인"
-            exch_label = TRADE_LABEL.get(act.get("trade_action", "HOLD"), "거래소에서 관망")
+            trade_action = act.get("trade_action", "HOLD")
+            exch_label = TRADE_LABEL.get(trade_action, "거래소에서 관망")
+            # Encode trade details as JSON suffix so frontend can parse
+            if trade_action != "HOLD" and act.get("trade_symbol"):
+                import json as _json
+                trade_info = _json.dumps({
+                    "action": trade_action,
+                    "symbol": act["trade_symbol"],
+                    "qty": act.get("trade_qty", 0),
+                    "price": act.get("trade_price", 0),
+                    "cash_after": act.get("trade_cash_after", 0),
+                }, ensure_ascii=False)
+                exch_label = f"{exch_label}||{trade_info}"
 
+            # 집 → 게시판 → 거래소 → 카페 → (거래소/카페 추가 방문) → 집
             waypoints = [
                 (home, "집에서 하루 계획"),
-                (self._tile_for(spots[0][1]) or home, spots[0][0]),
                 (board_t or home, board_label),
-                (self._tile_for(spots[1][1]) or home, spots[1][0]),
                 (exch_t or home, exch_label),
-                (self._tile_for(spots[2][1]) or home, spots[2][0]),
-                (home, "집으로 귀가"),
+                (cafe_t or home, "카페에서 휴식"),
             ]
-            # idle at home first (staggered start)
+            # 거래소/카페 추가 방문 (1~2회)
+            extra_visits = arng.randint(1, 2)
+            for _ in range(extra_visits):
+                if arng.random() < 0.5:
+                    waypoints.append((exch_t or home, "거래소 재방문"))
+                else:
+                    waypoints.append((cafe_t or home, "카페 재방문"))
+            waypoints.append((home, "집으로 귀가"))
+
             frames = [(home[0], home[1], "집에서 하루 계획") for _ in range(1 + start_delay)]
             for i in range(1, len(waypoints)):
                 seg = self._path(waypoints[i - 1][0], waypoints[i][0])
@@ -203,13 +214,11 @@ class Live:
                 label = waypoints[i][1]
                 for t in seg[1:]:
                     frames.append((t[0], t[1], label))
-                # arrival = the moment the agent reaches this waypoint tile
-                if i == 2:  # board
+                if i == 1:  # board
                     self.board_arrival[ag.id] = self.base + len(frames) - 1
-                elif i == 4:  # exchange
+                elif i == 2:  # exchange
                     self.exchange_arrival[ag.id] = self.base + len(frames) - 1
-                # linger at the destination so arrival timing spreads out further
-                for _ in range(arng.randint(4, 18)):
+                for _ in range(arng.randint(6, 20)):
                     frames.append((wx, wy, label))
             per_agent_frames[p["original"]] = frames
 
@@ -321,7 +330,37 @@ class Live:
         return {"<step>": step, "persona": persona, "meta": meta}
 
 
-_LIVE: Live | None = None
+def load_assets_from_artifact(artifact: dict) -> list[Asset]:
+    """Build Asset models from a listup artifact dict (same shape as default_assets.json)."""
+    out = []
+    for a in artifact.get("assets", []):
+        price = float(a.get("price") or 0.0)
+        out.append(Asset(
+            symbol=a["symbol"], name=a.get("name", a["symbol"]),
+            price=price, change24h=float(a.get("change24h") or 0.0),
+            volume=float(a.get("volume") or 0.0), priceHistory=[price],
+            sector=a.get("sector", ""),
+        ))
+    return out
+
+
+_SESSIONS: dict[str, Live] = {}  # uid -> Live
+
+
+def _get_live(uid: str | None) -> Live | None:
+    if uid and uid in _SESSIONS:
+        return _SESSIONS[uid]
+    # fallback: return the most recently created session (single-player compat)
+    return next(iter(reversed(_SESSIONS.values())), None) if _SESSIONS else None
+
+
+def _fetch_assets_from_upbit() -> dict | None:
+    """Run listup.build_artifact() to get fresh Upbit prices. None on failure."""
+    try:
+        import listup  # noqa: E402 — repo root, added to sys.path above
+        return listup.build_artifact()
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -330,21 +369,30 @@ _LIVE: Live | None = None
 class StartBody(BaseModel):
     fork_sim_code: str | None = None
     sim_code: str
+    seed: int | None = None  # optional user-specified seed
+
+
+class ResumeBody(BaseModel):
+    uid: str
+    sim_code: str | None = None
 
 
 class EventBody(BaseModel):
+    uid: str | None = None
     text: str
     is_rumor: bool = False
     source: str = "user"
 
 
 class StepBody(BaseModel):
+    uid: str | None = None
     step: int
     sim_code: str | None = None
     environment: dict | None = None
 
 
 class RunBody(BaseModel):
+    uid: str | None = None
     count: int = 0
 
 
@@ -352,84 +400,172 @@ class RunBody(BaseModel):
 # Control endpoints
 # --------------------------------------------------------------------------- #
 @app.get("/control/status")
-def control_status():
-    if _LIVE is None:
+def control_status(uid: str | None = None):
+    live = _get_live(uid)
+    if live is None:
         return {"loaded": False, "sim_code": None, "round": None,
                 "running_steps": False, "timeline_len": 0}
-    return {"loaded": True, "sim_code": _LIVE.sim_code, "round": _LIVE.game.round,
-            "running_steps": False, "timeline_len": len(_LIVE.timeline)}
+    return {"loaded": True, "sim_code": live.sim_code, "uid": uid,
+            "round": live.game.round,
+            "running_steps": False, "timeline_len": len(live.timeline)}
 
 
 @app.post("/control/start")
 def control_start(body: StartBody):
-    global _LIVE
+    from backend import db  # lazy import
+
     _maze()  # warm the maze once
-    _LIVE = Live(body.sim_code)
-    return {"status": "started", "sim_code": _LIVE.sim_code, "step": 0}
+
+    # 1. Fetch fresh assets from Upbit
+    artifact = _fetch_assets_from_upbit()
+    if artifact is None:
+        # Upbit API 실패 시 DB의 default_assets 사용
+        doc = db.get_default_assets_base()
+        if not doc:
+            return {"status": "error", "error": "Upbit API 실패 + DB에 default_assets 없음 — python -m backend.seed 실행 필요"}
+        artifact = doc
+
+    # 2. Determine seed
+    seed = body.seed if body.seed is not None else int.from_bytes(os.urandom(4), "big")
+
+    # 3. Save to MongoDB, get UUID
+    uid = db.create_session(artifact, seed=seed)
+
+    # 4. Build Asset models from the artifact
+    assets = load_assets_from_artifact(artifact)
+
+    # 5. Create Live session
+    live = Live(body.sim_code, assets=assets, seed=seed)
+    _SESSIONS[uid] = live
+
+    return {
+        "status": "started", "sim_code": live.sim_code, "uid": uid, "seed": seed, "step": 0,
+        "assets": [{"symbol": a.symbol, "name": a.name, "price": a.price, "change24h": a.change24h, "volume": a.volume, "sector": a.sector, "priceHistory": a.priceHistory} for a in assets],
+    }
+
+
+@app.post("/control/resume")
+def control_resume(body: ResumeBody):
+    """Resume a previously saved session from MongoDB."""
+    from backend import db
+
+    session = db.get_session(body.uid)
+    if not session:
+        return {"status": "error", "error": "session not found"}
+
+    game_state = session.get("game_state")
+    if not game_state:
+        return {"status": "error", "error": "no saved game_state for this session"}
+
+    _maze()
+    artifact = session["default_assets"]
+    seed = session["seed"]
+    assets = load_assets_from_artifact(artifact)
+
+    sim_code = body.sim_code or f"resume_{body.uid[:8]}"
+    live = Live(sim_code, assets=assets, seed=seed)
+    # Restore engine state from DB
+    live.game = GameSession.restore(game_state, assets=assets, seed=seed)
+    # Re-bind persona references to the restored agents
+    agents_by_id = {a.id: a for a in live.game.agents}
+    for p in live.persona:
+        restored = agents_by_id.get(p["agent"].id)
+        if restored:
+            p["agent"] = restored
+    _SESSIONS[body.uid] = live
+
+    return {
+        "status": "resumed",
+        "sim_code": sim_code,
+        "uid": body.uid,
+        "seed": seed,
+        "round": live.game.round,
+        "finished": live.game.finished,
+        "step": 0,
+    }
 
 
 @app.post("/control/market/event")
 def control_market_event(body: EventBody):
-    if _LIVE is None:
+    live = _get_live(body.uid)
+    if live is None:
         return {"status": "error", "error": "not started"}
-    if _LIVE.game.finished:
-        return {"status": "finished", "round": _LIVE.game.round,
+    if live.game.finished:
+        return {"status": "finished", "round": live.game.round,
                 "error": "5 라운드 종료 — 재시작하세요"}
-    # Snapshot BEFORE the round so the UI can ramp market/prices from here to the
-    # post-round values across the day animation (numbers move in sync with movement).
-    _LIVE.start_market = _LIVE.game.market.model_dump()
-    _LIVE.start_prices = {a.symbol: a.price for a in _LIVE.game.assets}
+    live.start_market = live.game.market.model_dump()
+    live.start_prices = {a.symbol: a.price for a in live.game.assets}
     try:
-        _LIVE.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
+        live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
     except RuntimeError as e:
-        return {"status": "finished", "round": _LIVE.game.round, "error": str(e)}
-    except Exception as e:  # transient LLM/data hiccup -> don't 500
-        return {"status": "error", "round": _LIVE.game.round, "error": str(e)[:200]}
-    _st = _LIVE.game.state()
-    _LIVE.final_market = _st["market"]
-    _LIVE.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
-    try:
-        _LIVE.build_timeline()
+        return {"status": "finished", "round": live.game.round, "error": str(e)}
     except Exception as e:
-        return {"status": "error", "round": _LIVE.game.round, "error": f"timeline: {str(e)[:160]}"}
-    ev = _LIVE.game.events[0] if _LIVE.game.events else None
-    return {"status": "ok", "round": _LIVE.game.round,
+        return {"status": "error", "round": live.game.round, "error": str(e)[:200]}
+    _st = live.game.state()
+    live.final_market = _st["market"]
+    live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
+    try:
+        live.build_timeline()
+    except Exception as e:
+        return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
+
+    # persist game state to DB
+    try:
+        from backend import db
+        db.save_game_state(body.uid, _st) if body.uid else None
+    except Exception as e:
+        print(f"[WARN] save_game_state failed: {e}")
+
+    ev = live.game.events[0] if live.game.events else None
+    return {"status": "ok", "round": live.game.round,
             "event": ev.text if ev else body.text,
             "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
 
 
 @app.get("/control/market/state")
-def control_market_state():
-    if _LIVE is None:
+def control_market_state(uid: str | None = None):
+    live = _get_live(uid)
+    if live is None:
         return {"ready": False}
-    st = _LIVE.game.state()
+    st = live.game.state()
     st["ready"] = True
     return st
 
 
 @app.get("/control/report/overall")
-def control_report_overall():
+def control_report_overall(uid: str | None = None):
     """FR-9/FR-10: overall report + achievements (shown when 5 rounds finish)."""
-    if _LIVE is None:
+    live = _get_live(uid)
+    if live is None:
         return {"ready": False}
-    rep = _LIVE.game.overall_report()
-    return {"ready": True, "finished": _LIVE.game.finished, "report": rep.model_dump()}
+    rep = live.game.overall_report()
+    return {"ready": True, "finished": live.game.finished, "report": rep.model_dump()}
 
 
 @app.post("/control/run")
 def control_run(body: RunBody):
-    # Timeline is built on the event; nothing to run here. Kept for FE compat.
     return {"status": "ok", "count": body.count}
+
+
+@app.get("/control/sessions")
+def control_sessions():
+    """List active in-memory sessions."""
+    return [
+        {"uid": uid, "sim_code": s.sim_code, "round": s.game.round,
+         "finished": s.game.finished}
+        for uid, s in _SESSIONS.items()
+    ]
 
 
 # --------------------------------------------------------------------------- #
 # Data (map/movement) endpoints
 # --------------------------------------------------------------------------- #
 @app.get("/api/home")
-def api_home():
-    if _LIVE is None:
+def api_home(uid: str | None = None):
+    live = _get_live(uid)
+    if live is None:
         return {"error": "backend_not_started"}
-    return _LIVE.home_payload()
+    return live.home_payload()
 
 
 @app.post("/api/environment/process")
@@ -439,6 +575,45 @@ def api_env_process(body: StepBody):
 
 @app.post("/api/environment/update")
 def api_env_update(body: StepBody):
-    if _LIVE is None:
+    live = _get_live(body.uid)
+    if live is None:
         return {"<step>": -1}
-    return _LIVE.movement_payload(body.step)
+    return live.movement_payload(body.step)
+
+
+@app.websocket("/ws/movement/{uid}")
+async def ws_movement(websocket: WebSocket, uid: str):
+    """Stream the entire timeline step-by-step over a websocket.
+
+    The client connects after a round is kicked off. The server pushes each
+    step's payload at a fixed interval (no polling overhead, no network jitter
+    between steps). The client buffers and animates smoothly.
+    """
+    await websocket.accept()
+    # ponytail: 50ms per step → ~20 fps tile movement
+    STEP_INTERVAL = 0.05
+    try:
+        while True:
+            live = _get_live(uid)
+            if live is None or not live.timeline:
+                await asyncio.sleep(0.3)
+                continue
+            # Stream all steps from current position
+            base = live.base
+            for idx in range(len(live.timeline)):
+                payload = live.movement_payload(base + idx)
+                if payload.get("<step>", -1) == -1:
+                    break
+                await websocket.send_json(payload)
+                await asyncio.sleep(STEP_INTERVAL)
+            # Timeline drained — signal end and wait for next round
+            await websocket.send_json({"<step>": -1, "timeline_end": True})
+            # Wait until a new timeline appears
+            old_base = live.base
+            while True:
+                await asyncio.sleep(0.3)
+                live = _get_live(uid)
+                if live and live.base != old_base and live.timeline:
+                    break
+    except WebSocketDisconnect:
+        pass

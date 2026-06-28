@@ -114,6 +114,28 @@ class GameSession:
             a.id: {"cash": a.cash, "net_worth": self._net_worth(a)} for a in self.agents
         }
 
+    @classmethod
+    def restore(cls, saved: dict, assets=None, seed: int = 42) -> "GameSession":
+        """Reconstruct a GameSession from a saved state() dict."""
+        session = cls.__new__(cls)
+        session.seed = seed
+        session.num_agents = len(saved.get("agents", []))
+        real = default_client()
+        session.client = real if real.available else scripted_client()
+        session.assets = assets if assets is not None else load_assets()
+        session.sectors = saved.get("sectors", load_sectors())
+        session.agents = [Agent(**a) for a in saved.get("agents", [])]
+        session.posts = [Post(**p) for p in saved.get("posts", [])]
+        session.events = [Event(**e) for e in saved.get("events", [])]
+        session.round = saved.get("round", 0)
+        session.round_reports = []
+        session.last_round_actions = []
+        session.market = MarketData(**saved["market"]) if saved.get("market") else market_state.compute_market_data(session.agents, session.assets)
+        session._initial_state = {
+            a.id: {"cash": a.cash, "net_worth": session._net_worth(a)} for a in session.agents
+        }
+        return session
+
     # ------------------------------------------------------------------ #
     def _net_worth(self, agent: Agent) -> float:
         held = sum(h.amount * h.avgPrice for h in agent.portfolio)
@@ -234,6 +256,9 @@ class GameSession:
                 "post_text": my_posts[-1].content if my_posts else None,
                 "trade_action": tr.action.value if tr else "HOLD",
                 "trade_symbol": tr.symbol if tr else None,
+                "trade_qty": tr.qty if tr else 0.0,
+                "trade_price": tr.price if tr else 0.0,
+                "trade_cash_after": tr.cash_after if tr else ag.cash,
                 "traded": bool(tr and tr.action.value != "HOLD"),
             })
         return rr

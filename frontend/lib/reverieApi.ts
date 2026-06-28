@@ -154,8 +154,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
 /* ── Endpoints ── */
 
-export function getHome(): Promise<HomeResult> {
-  return getJson<HomeResult>("/api/home");
+export function getHome(uid?: string): Promise<HomeResult> {
+  const q = uid ? `?uid=${uid}` : "";
+  return getJson<HomeResult>(`/api/home${q}`);
 }
 
 export function processEnvironment(
@@ -166,9 +167,11 @@ export function processEnvironment(
 
 export function updateEnvironment(
   step: number,
-  simCode: string
+  simCode: string,
+  uid?: string
 ): Promise<MovementUpdateResponse> {
   return postJson<MovementUpdateResponse>("/api/environment/update", {
+    uid,
     step,
     sim_code: simCode,
   });

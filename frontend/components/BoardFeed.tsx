@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Post } from "@/mock_data/posts";
 import { GameEvent } from "@/mock_data/events";
 import {
@@ -16,8 +16,14 @@ import {
   Megaphone,
 } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
+import { AGENT_PROFILES } from "@/constants/agentProfiles";
 
-const tabs = ["전체", "BTC", "ETH", "SOL"];
+// agentId -> profile image path
+const PROFILE_IMG: Record<string, string> = Object.fromEntries(
+  AGENT_PROFILES.map((p) => [p.id, p.profile])
+);
+
+// ponytail: tabs derived from actual post assets, not hardcoded
 
 /** impact → notice 배너 톤 (2-Hue) */
 const IMPACT_STYLES: Record<
@@ -36,6 +42,10 @@ export default function BoardFeed({
   posts: Post[];
   events?: GameEvent[];
 }) {
+  const tabs = useMemo(() => {
+    const symbols = new Set(posts.filter((p) => p.agentId !== "system" && p.agentId !== "시스템" && p.asset).map((p) => p.asset!));
+    return ["전체", ...Array.from(symbols).sort()];
+  }, [posts]);
   const [activeTab, setActiveTab] = useState("전체");
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
@@ -54,7 +64,12 @@ export default function BoardFeed({
     return () => clearInterval(id);
   }, []);
 
-  const filtered = activeTab === "전체" ? posts : posts.filter((p) => p.asset === activeTab);
+  // ponytail: filter out system/news posts — they already show as pinned event banner
+  // ponytail: filter out system/news posts — they already show as pinned event banner
+  const nonSystem = posts.filter((p) => p.agentId !== "system" && p.agentId !== "시스템");
+  const byTab = activeTab === "전체" ? nonSystem : nonSystem.filter((p) => p.asset === activeTab);
+  // Latest posts first
+  const filtered = [...byTab].reverse();
 
   const latestEvent = events.length > 0 ? events[events.length - 1] : null;
   const priorEvents = events.length > 1 ? events.slice(0, -1).slice(-3).reverse() : [];
@@ -175,6 +190,7 @@ export default function BoardFeed({
 
             {/* Posts */}
             {filtered.map((post) => {
+              const profileSrc = PROFILE_IMG[post.agentId];
               const AgentIcon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
               const liked = likedPosts.has(post.id);
               const showComments = expandedComments.has(post.id);
@@ -185,7 +201,11 @@ export default function BoardFeed({
                     {/* Author row */}
                     <div className="flex items-center gap-2.5 mb-2">
                       <div className="w-9 h-9 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center text-black overflow-hidden">
-                        <AgentIcon size={16} />
+                        {profileSrc ? (
+                          <img src={profileSrc} alt={post.agentAlias} className="w-full h-full object-cover" />
+                        ) : (
+                          <AgentIcon size={16} />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-bold text-black leading-tight">
@@ -250,11 +270,16 @@ export default function BoardFeed({
                           <p className="text-[11px] text-pixel-muted">아직 댓글이 없습니다</p>
                         ) : (
                           post.comments.map((c, i) => {
+                            const cProfile = PROFILE_IMG[c.agentId];
                             const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
                             return (
                               <div key={i} className="flex items-start gap-2">
-                                <div className="w-6 h-6 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center flex-shrink-0 mt-0.5 text-black">
-                                  <CIcon size={11} />
+                                <div className="w-6 h-6 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center flex-shrink-0 mt-0.5 text-black overflow-hidden">
+                                  {cProfile ? (
+                                    <img src={cProfile} alt={c.agentAlias} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <CIcon size={11} />
+                                  )}
                                 </div>
                                 <div className="flex-1 min-w-0 bg-pixel-wall rounded-2xl rounded-tl-md px-2.5 py-1.5">
                                   <span className="text-[11px] font-bold text-black">{c.agentAlias}</span>

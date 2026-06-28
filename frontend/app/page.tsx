@@ -55,7 +55,7 @@ function normalizeImpact(
 
 export default function Home() {
   const [gameStarted, setGameStarted] = useState(false);
-  const [currentRound, setCurrentRound] = useState(1);
+  const [currentRound, setCurrentRound] = useState(0);
   const [marketOpen, setMarketOpen] = useState(true);
   const [boardOpen, setBoardOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
@@ -67,8 +67,11 @@ export default function Home() {
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
   // True while a round is being computed on the backend (LLM, ~10-30s).
   const [computing, setComputing] = useState(false);
+  const [needEvent, setNeedEvent] = useState(true); // force event input open at round start
   // Live reverie sim code, set once fork + run resolve.
   const [canonicalSim, setCanonicalSim] = useState<string | null>(null);
+  // Per-user session UID from the backend (MongoDB).
+  const [sessionUid, setSessionUid] = useState<string | null>(null);
   const reverieControlsRef = useRef<GameControls | null>(null);
   // Real round report (from meta) + end-of-game overall report.
   const [roundReport, setRoundReport] =
@@ -94,7 +97,7 @@ export default function Home() {
     });
     setEvents([]);
     setPosts([]);
-    setCurrentRound(1);
+    setCurrentRound(0);
   }, []);
 
   const handleStart = useCallback(
@@ -115,8 +118,19 @@ export default function Home() {
       const sim = `market_${Date.now()}`;
       control
         .start(FORK_SIM_CODE, sim)
-        .then(() => {
+        .then((res) => {
           setCanonicalSim(sim);
+          if (res.uid) {
+            setSessionUid(res.uid);
+            control.saveSessionUid(res.uid);
+          }
+          // Use backend's full asset list (37 coins) instead of frontend DEFAULT_ASSETS (4)
+          if (res.assets?.length) {
+            const backendAssets = res.assets as Asset[];
+            setMarketData((prev) =>
+              prev ? { ...prev, assets: backendAssets } : prev
+            );
+          }
         })
         .catch((err) => {
           console.warn("[MarketAquarium] canonical start failed:", err);
@@ -124,6 +138,45 @@ export default function Home() {
     },
     [seedFromSetup]
   );
+
+  const handleResume = useCallback(() => {
+    const savedUid = control.loadSessionUid();
+    if (!savedUid) return;
+    setGameStarted(true);
+    setRoundReport(null);
+    setOverall(null);
+    overallFetchedRef.current = false;
+
+    const sim = `resume_${Date.now()}`;
+    control
+      .resume(savedUid, sim)
+      .then((res) => {
+        if (res.status === "error") {
+          console.warn("[MarketAquarium] resume failed:", res.error);
+          control.clearSessionUid();
+          setGameStarted(false);
+          return;
+        }
+        setCanonicalSim(sim);
+        setSessionUid(savedUid);
+        if (typeof res.round === "number") setCurrentRound(res.round);
+        // Fetch full state so panels populate immediately
+        control.marketState(savedUid).then((st) => {
+          if (st.ready) {
+            if (st.market) setMarketData(st.market);
+            if (st.posts) setPosts(st.posts);
+            if (st.events) setEvents(st.events);
+            if (st.agents?.length) setAgents(st.agents);
+            if (typeof st.round === "number") setCurrentRound(st.round);
+          }
+        }).catch(() => { });
+      })
+      .catch((err) => {
+        console.warn("[MarketAquarium] resume failed:", err);
+        control.clearSessionUid();
+        setGameStarted(false);
+      });
+  }, []);
 
   /** Canonical movement-update tick: drive panels from meta.market/posts/round. */
   const handleTick = useCallback((meta: ReverieMeta) => {
@@ -139,32 +192,26 @@ export default function Home() {
     if (meta.finished && !overallFetchedRef.current) {
       overallFetchedRef.current = true;
       control
-        .overallReport()
+        .overallReport(sessionUid ?? undefined)
         .then((r) => {
           if (r.report) setOverall(r.report);
         })
         .catch((err) => console.warn("[MarketAquarium] overall report:", err));
     }
-  }, []);
+  }, [sessionUid]);
 
   const handleEvent = useCallback((text: string) => {
-    // Inject the round's global event, THEN run exactly one in-game day. The day
-    // is planned at the first run step AFTER the event is set, so agents react
-    // that same day (the backend only injects board/exchange visits while an
-    // event is active). Market/posts updates flow back through handleTick as the
-    // movement JSON streams in.
+    setNeedEvent(false);
     setComputing(true);
     control
-      .marketEvent({ text, is_rumor: false })
+      .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
       .then((res) => {
         setActiveEvent({
           text,
           impact: normalizeImpact(res.impact),
           source: "user",
         });
-        // Kick off one day. Ignore "already running" errors — a run may still
-        // be draining from a previous event.
-        control.run(STEPS_PER_DAY).catch((err) => {
+        control.run(STEPS_PER_DAY, sessionUid ?? undefined).catch((err) => {
           console.warn("[MarketAquarium] run after event:", err);
         });
       })
@@ -173,7 +220,7 @@ export default function Home() {
         setActiveEvent({ text, impact: "neutral", source: "user" });
       })
       .finally(() => setComputing(false));
-  }, []);
+  }, [sessionUid]);
 
   const handleToggleReport = useCallback(() => {
     setReportOpen((prev) => !prev);
@@ -187,9 +234,14 @@ export default function Home() {
     reverieControlsRef.current?.zoomOut();
   }, []);
 
+  const handleKeyboardEnabled = useCallback((on: boolean) => {
+    reverieControlsRef.current?.setKeyboardEnabled(on);
+  }, []);
+
   /** A round's animation finished -> tell the player with the round summary. */
   const handleRoundEnd = useCallback((_round: number) => {
     setReportOpen(true);
+    setNeedEvent(true);
   }, []);
 
   /** Click a character on the map -> open its detail (portfolio composition). */
@@ -205,7 +257,7 @@ export default function Home() {
   );
 
   if (!gameStarted) {
-    return <SetupScreen onStart={handleStart} />;
+    return <SetupScreen onStart={handleStart} onResume={handleResume} />;
   }
 
   // Round report: the real backend report (with price-breakdown infographic)
@@ -214,10 +266,10 @@ export default function Home() {
     rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
   const reportForView = roundReport
     ? {
-        round: roundReport.round,
-        markdown: roundReport.markdown,
-        price_breakdowns: roundReport.price_breakdowns,
-      }
+      round: roundReport.round,
+      markdown: roundReport.markdown,
+      price_breakdowns: roundReport.price_breakdowns,
+    }
     : { round: currentRound, markdown: mockReport.markdown };
 
   return (
@@ -227,6 +279,7 @@ export default function Home() {
         {canonicalSim ? (
           <ReverieGame
             simCode={canonicalSim}
+            uid={sessionUid ?? undefined}
             onTick={handleTick}
             controlsRef={reverieControlsRef}
             onSelectAgent={handleSelectAgent}
@@ -253,6 +306,8 @@ export default function Home() {
         boardNotifications={posts.length}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
+        onKeyboardEnabled={handleKeyboardEnabled}
+        forceEventOpen={needEvent}
       />
 
       {/* Market panel - floating left, content-fit */}

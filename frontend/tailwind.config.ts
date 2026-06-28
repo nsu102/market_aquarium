@@ -74,9 +74,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["Pretendard", "system-ui", "sans-serif"],
-        pixel: ["Pretendard", "system-ui", "sans-serif"],
-        mono: ["Pretendard", "system-ui", "sans-serif"],
+        sans: ["Pretendard Variable", "Pretendard", "system-ui", "sans-serif"],
+        pixel: ["Galmuri11", "Pretendard", "system-ui", "sans-serif"],
+        mono: ["Galmuri11", "monospace"],
       },
       // DESIGN 1-4: rounded — card/button 12px, modal 16px, larger for phone.
       borderRadius: {

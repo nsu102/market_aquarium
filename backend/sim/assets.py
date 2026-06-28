@@ -23,9 +23,21 @@ def _load_raw(path_str: str) -> dict:
         return json.load(f)
 
 
+def _get_raw(path: Path | None = None) -> dict:
+    """Load from MongoDB."""
+    if path is not None:
+        return _load_raw(str(path))
+    from backend.db import _db
+    doc = _db().default_assets.find_one({"_id": "current"})
+    if not doc:
+        raise RuntimeError("default_assets not found in MongoDB — run: python -m backend.seed")
+    doc.pop("_id", None)
+    return doc
+
+
 def load_assets(path: Path | None = None, limit: int | None = None) -> list[Asset]:
-    """Return assets from default_assets.json as Asset models (with seeded history)."""
-    raw = _load_raw(str(path or DEFAULT_ASSETS_PATH))
+    """Return assets as Asset models. Reads from MongoDB first, file fallback."""
+    raw = _get_raw(path)
     out: list[Asset] = []
     for a in raw.get("assets", []):
         price = float(a.get("price") or 0.0)
@@ -46,7 +58,7 @@ def load_assets(path: Path | None = None, limit: int | None = None) -> list[Asse
 
 
 def load_sectors(path: Path | None = None) -> list[str]:
-    raw = _load_raw(str(path or DEFAULT_ASSETS_PATH))
+    raw = _get_raw(path)
     return list(raw.get("sectors", []))
 
 
