@@ -117,5 +117,8 @@ node_modules
 .gstack/
 
 # runtime-generated live sims (not committed)
-environment/frontend_server/storage/market_*/
+environment/
 .env.local
+
+.agents
+AGENTS.md

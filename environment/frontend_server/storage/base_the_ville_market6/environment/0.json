@@ -1,7 +1,7 @@
 {
   "Jane Moreno": {
     "maze": "the_ville",
-    "x": 72,
+    "x": 54,
     "y": 74
   },
   "Eddy Lin": {
@@ -11,22 +11,22 @@
   },
   "Klaus Mueller": {
     "maze": "the_ville",
-    "x": 126,
-    "y": 46
+    "x": 36,
+    "y": 65
   },
   "Rajiv Patel": {
     "maze": "the_ville",
-    "x": 26,
-    "y": 18
+    "x": 20,
+    "y": 65
   },
   "Arthur Burton": {
     "maze": "the_ville",
-    "x": 53,
-    "y": 14
+    "x": 28,
+    "y": 65
   },
   "Wolfgang Schulz": {
     "maze": "the_ville",
-    "x": 107,
-    "y": 62
+    "x": 72,
+    "y": 74
   }
 }

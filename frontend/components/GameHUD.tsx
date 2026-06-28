@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Fish,
   BarChart3,
@@ -26,6 +26,9 @@ interface Props {
   boardNotifications: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onKeyboardEnabled?: (on: boolean) => void;
+  /** Force-open the event input (e.g. after round end). */
+  forceEventOpen?: boolean;
 }
 
 function Badge({ count }: { count: number }) {
@@ -51,15 +54,54 @@ export default function GameHUD({
   boardNotifications,
   onZoomIn,
   onZoomOut,
+  onKeyboardEnabled,
+  forceEventOpen,
 }: Props) {
   const [eventOpen, setEventOpen] = useState(false);
+
+  useEffect(() => {
+    if (forceEventOpen) setEventOpen(true);
+  }, [forceEventOpen]);
   const [eventText, setEventText] = useState("");
 
-  const submit = () => {
-    if (!eventText.trim()) return;
-    onEvent(eventText.trim());
-    setEventText("");
+  // ponytail: preset event pool — random placeholder shown each time
+  const EVENT_PRESETS = [
+    "미 연준이 기준금리를 0.25%p 인상했다",
+    "트럼프가 중국산 반도체에 25% 관세를 발표했다",
+    "SEC가 주요 거래소를 상대로 소송을 제기했다",
+    "비트코인 ETF 일일 순유입 $1B 돌파",
+    "테더(USDT)의 준비금 감사 보고서가 공개되었다",
+    "이더리움 네트워크 대규모 업그레이드 완료",
+    "일본 중앙은행이 마이너스 금리를 종료했다",
+    "대형 거래소에서 해킹으로 $200M 유출",
+    "엘살바도르가 비트코인 법정화폐 정책을 철회했다",
+    "블랙록이 이더리움 ETF 신청서를 제출했다",
+    "중국 인민은행이 대규모 유동성을 공급했다",
+    "미국 CPI가 예상치를 크게 상회했다",
+    "유명 인플루언서가 밈코인 러그풀로 기소되었다",
+    "마이크로스트래티지가 BTC 10,000개 추가 매입",
+    "EU가 암호화폐 규제 프레임워크를 확정했다",
+    "솔라나 네트워크가 6시간 동안 다운되었다",
+    "페이팔이 스테이블코인 결제를 전면 확대했다",
+    "미국 실업률이 예상 밖으로 급등했다",
+    "바이낸스 CEO가 사임을 발표했다",
+    "비트코인 반감기가 한 달 앞으로 다가왔다",
+  ];
+
+  const [placeholder] = useState(
+    () => EVENT_PRESETS[Math.floor(Math.random() * EVENT_PRESETS.length)]
+  );
+
+  const closeEvent = () => {
     setEventOpen(false);
+    onKeyboardEnabled?.(true);
+  };
+
+  const submit = () => {
+    const text = eventText.trim() || placeholder;
+    onEvent(text);
+    setEventText("");
+    closeEvent();
   };
 
   return (
@@ -151,7 +193,7 @@ export default function GameHUD({
               <span className="text-[11px] text-black font-bold tracking-wider">GLOBAL EVENT</span>
               <div className="flex-1" />
               <button
-                onClick={() => setEventOpen(false)}
+                onClick={closeEvent}
                 aria-label="닫기"
                 className="w-6 h-6 border-2 border-black rounded-lg bg-white flex items-center justify-center text-black hover:bg-pixel-danger hover:text-white cursor-pointer"
               >
@@ -162,14 +204,18 @@ export default function GameHUD({
               <input
                 value={eventText}
                 onChange={(e) => setEventText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-                placeholder="트럼프가 중국 반도체 관세를 예고했다..."
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") submit();
+                }}
+                onFocus={() => onKeyboardEnabled?.(false)}
+                onBlur={() => onKeyboardEnabled?.(true)}
+                placeholder={placeholder}
                 autoFocus
                 className="flex-1 bg-white border-2 border-black rounded-lg px-3 py-2 text-sm text-black placeholder:text-pixel-muted focus:outline-none focus:bg-pixel-path"
               />
               <button
                 onClick={submit}
-                disabled={!eventText.trim()}
                 className="px-4 py-2 bg-pixel-grass border-2 border-black rounded-lg text-black text-sm font-bold hover:brightness-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
               >
                 <Send size={13} />

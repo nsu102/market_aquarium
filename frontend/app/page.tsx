@@ -67,6 +67,7 @@ export default function Home() {
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
   // True while a round is being computed on the backend (LLM, ~10-30s).
   const [computing, setComputing] = useState(false);
+  const [needEvent, setNeedEvent] = useState(true); // force event input open at round start
   // Live reverie sim code, set once fork + run resolve.
   const [canonicalSim, setCanonicalSim] = useState<string | null>(null);
   // Per-user session UID from the backend (MongoDB).
@@ -161,7 +162,7 @@ export default function Home() {
             if (st.agents?.length) setAgents(st.agents);
             if (typeof st.round === "number") setCurrentRound(st.round);
           }
-        }).catch(() => {});
+        }).catch(() => { });
       })
       .catch((err) => {
         console.warn("[MarketAquarium] resume failed:", err);
@@ -193,6 +194,7 @@ export default function Home() {
   }, [sessionUid]);
 
   const handleEvent = useCallback((text: string) => {
+    setNeedEvent(false);
     setComputing(true);
     control
       .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
@@ -225,9 +227,14 @@ export default function Home() {
     reverieControlsRef.current?.zoomOut();
   }, []);
 
+  const handleKeyboardEnabled = useCallback((on: boolean) => {
+    reverieControlsRef.current?.setKeyboardEnabled(on);
+  }, []);
+
   /** A round's animation finished -> tell the player with the round summary. */
   const handleRoundEnd = useCallback((_round: number) => {
     setReportOpen(true);
+    setNeedEvent(true);
   }, []);
 
   /** Click a character on the map -> open its detail (portfolio composition). */
@@ -252,10 +259,10 @@ export default function Home() {
     rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
   const reportForView = roundReport
     ? {
-        round: roundReport.round,
-        markdown: roundReport.markdown,
-        price_breakdowns: roundReport.price_breakdowns,
-      }
+      round: roundReport.round,
+      markdown: roundReport.markdown,
+      price_breakdowns: roundReport.price_breakdowns,
+    }
     : { round: currentRound, markdown: mockReport.markdown };
 
   return (
@@ -292,6 +299,8 @@ export default function Home() {
         boardNotifications={posts.length}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
+        onKeyboardEnabled={handleKeyboardEnabled}
+        forceEventOpen={needEvent}
       />
 
       {/* Market panel - floating left, content-fit */}

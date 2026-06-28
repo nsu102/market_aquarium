@@ -1,5 +1,7 @@
 /* ── Pretendard: 한글+라틴 가변 산세리프 (DESIGN.md 1-5) — @import는 반드시 최상단 ── */
 @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css");
+/* ── Galmuri: 한글 픽셀 폰트 — 게임 UI 라벨/제목용 ── */
+@import url("https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css");
 
 @tailwind base;
 @tailwind components;

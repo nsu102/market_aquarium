@@ -52,18 +52,8 @@ sys.path.insert(0, _REPO)
 # --------------------------------------------------------------------------- #
 # the_ville location mapping (use existing places).
 # --------------------------------------------------------------------------- #
-BOARD_ADDR = "the Ville:Hobbs Cafe:cafe:cafe customer seating"        # 게시판
-EXCHANGE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 거래소
-
-# Daily-life stops sprinkled between the mandatory board/exchange visits.
-DAILY_SPOTS = [
-    ("공원에서 산책", "the Ville:Johnson Park:park:park garden"),
-    ("도서관에서 자료 조사", "the Ville:Oak Hill College:library:library table"),
-    ("펍에서 한 잔", "the Ville:The Rose and Crown Pub:pub:bar customer seating"),
-    ("공용 공간에서 잡담", "the Ville:artist's co-living space:common room:common room sofa"),
-    ("마트 구경", "the Ville:Harvey Oak Supply Store:supply store:supply store product shelf"),
-    ("카페에서 커피 한 잔", "the Ville:Hobbs Cafe:cafe:piano"),
-]
+BOARD_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 게시판 (매매소2)
+EXCHANGE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 거래소 (매매소1)
 
 FORK_ENV0 = join(
     _REPO, "environment", "frontend_server", "storage",
@@ -179,27 +169,19 @@ class Live:
             ag = p["agent"]
             act = actions.get(ag.id, {})
             home = p["home"]
-            # Per-agent RNG so each persona's TIMING differs: a different start
-            # delay (idle at home) and different linger at each stop means each one
-            # reaches the board / exchange at a different step ("누가 언제 갔는가").
+            # Per-agent RNG for staggered timing.
             arng = random.Random((hash(ag.id) & 0xFFFFFFFF) ^ (self.game.round * 2654435761))
-            start_delay = arng.randint(0, 70)
-            # three random daily-life stops: before board, between board & exchange,
-            # and between exchange & home.
-            spots = arng.sample(DAILY_SPOTS, 3)
+            start_delay = arng.randint(0, 40)
             board_label = "게시판에 글 작성" if act.get("posted") else "게시판에서 분위기 확인"
             exch_label = TRADE_LABEL.get(act.get("trade_action", "HOLD"), "거래소에서 관망")
 
+            # ponytail: simplified route — 집 → 게시판 → 거래소 → 집
             waypoints = [
                 (home, "집에서 하루 계획"),
-                (self._tile_for(spots[0][1]) or home, spots[0][0]),
                 (board_t or home, board_label),
-                (self._tile_for(spots[1][1]) or home, spots[1][0]),
                 (exch_t or home, exch_label),
-                (self._tile_for(spots[2][1]) or home, spots[2][0]),
                 (home, "집으로 귀가"),
             ]
-            # idle at home first (staggered start)
             frames = [(home[0], home[1], "집에서 하루 계획") for _ in range(1 + start_delay)]
             for i in range(1, len(waypoints)):
                 seg = self._path(waypoints[i - 1][0], waypoints[i][0])
@@ -207,13 +189,11 @@ class Live:
                 label = waypoints[i][1]
                 for t in seg[1:]:
                     frames.append((t[0], t[1], label))
-                # arrival = the moment the agent reaches this waypoint tile
-                if i == 2:  # board
+                if i == 1:  # board
                     self.board_arrival[ag.id] = self.base + len(frames) - 1
-                elif i == 4:  # exchange
+                elif i == 2:  # exchange
                     self.exchange_arrival[ag.id] = self.base + len(frames) - 1
-                # linger at the destination so arrival timing spreads out further
-                for _ in range(arng.randint(4, 18)):
+                for _ in range(arng.randint(6, 20)):
                     frames.append((wx, wy, label))
             per_agent_frames[p["original"]] = frames
 

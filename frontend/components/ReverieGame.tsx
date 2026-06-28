@@ -36,8 +36,17 @@ import {
   type ProcessEnvironmentBody,
   type ReverieMeta,
 } from "@/lib/reverieApi";
+import { AGENT_PROFILES } from "@/constants/agentProfiles";
 
 const TILE_WIDTH = 32;
+
+// sprite filename (underscore) -> Korean alias
+const ALIAS_MAP: Record<string, string> = Object.fromEntries(
+  AGENT_PROFILES.map((p) => {
+    const under = p.sprite.split("/").pop()?.replace(".png", "") ?? "";
+    return [under, p.alias];
+  })
+);
 const CURR_MAZE = "the_ville";
 // px/frame. TILE_WIDTH must divide evenly so personas land exactly on tiles.
 // 16 -> 2 frames/tile (2x faster day animation; 8 felt too slow).
@@ -50,6 +59,8 @@ const UPDATE_BACKOFF_MS = 700;
 export interface GameControls {
   zoomIn: () => void;
   zoomOut: () => void;
+  /** Disable/enable keyboard camera controls (e.g. while typing in an input). */
+  setKeyboardEnabled: (on: boolean) => void;
 }
 
 interface Props {
@@ -195,7 +206,9 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       });
     }
 
+    let sceneRef: Phaser.Scene;
     function create(this: Phaser.Scene) {
+      sceneRef = this;
       const map = this.make.tilemap({ key: "map" });
 
       const collisions = map.addTilesetImage("blocks", "blocks_1")!;
@@ -245,7 +258,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       // spawn cluster so they are on-screen, and zoom in so characters read at a
       // comfortable size (default zoom 1.0 makes the 32px sprites look tiny).
       player = this.physics.add
-        .sprite(2400, 1600, "atlas", "down")
+        .sprite(1913, 1849, "atlas", "down")
         .setSize(30, 40)
         .setOffset(0, 0);
       player.setVisible(false);
@@ -253,8 +266,18 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       const camera = this.cameras.main;
       camera.startFollow(player);
       camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-      camera.setZoom(1.3);
+      camera.setZoom(0.5);
       cursors = this.input.keyboard!.createCursorKeys();
+
+      // *** CLICK: show tile coordinate ***
+      this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        const cam = this.cameras.main;
+        const wx = (pointer.x - cam.width / 2) / cam.zoom + cam.scrollX + cam.width / 2;
+        const wy = (pointer.y - cam.height / 2) / cam.zoom + cam.scrollY + cam.height / 2;
+        const tx = Math.floor(wx / TILE_WIDTH);
+        const ty = Math.floor(wy / TILE_WIDTH);
+        console.log(`[tile] (${tx}, ${ty})  [px] (${Math.round(wx)}, ${Math.round(wy)})`);
+      });
 
       // *** MOUSE NAVIGATION: drag to pan, wheel to zoom ***
       this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
@@ -268,7 +291,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
         "wheel",
         (_p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) => {
           const cam = this.cameras.main;
-          cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.2, 2));
+          cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.3, 2));
         }
       );
 
@@ -282,21 +305,41 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
         const sprite = this.physics.add
           .sprite(startPos[0], startPos[1], name, "down")
           .setSize(30, 40)
-          .setOffset(0, 32);
+          .setOffset(0, 32)
+          .setScale(2);
         // Click a character to open its detail (portfolio composition, etc.).
         sprite.setInteractive({ useHandCursor: true });
         sprite.on("pointerdown", () => onSelectRef.current?.(p.original));
         personaSprites[name] = sprite;
 
-        // Small text label with initials (NO emoji bubble).
+        // Full alias label above sprite.
+        const alias = ALIAS_MAP[name] || p.original;
         labels[name] = this.add
-          .text(sprite.body.x - 6, sprite.body.y - 74, p.initial || initialsOf(p.original), {
-            font: "16px monospace",
+          .text(sprite.body.x - 6, sprite.body.y - 74, alias, {
+            font: "bold 32px Galmuri11, sans-serif",
             color: "#1E1A17",
-            padding: { x: 6, y: 4 },
-            backgroundColor: "#ffffff",
+            padding: { x: 6, y: 3 },
+            backgroundColor: "#ffffffcc",
           })
+          .setOrigin(0.5, 1)
           .setDepth(3);
+      });
+
+      // *** BUILDING LABELS ***
+      const buildingLabels = [
+        { x: 63, y: 41, text: "게시판", bg: "#2E7D32cc" },
+        { x: 84, y: 41, text: "매매소", bg: "#C85A4Acc" },
+      ];
+      buildingLabels.forEach(({ x, y, text, bg }) => {
+        this.add
+          .text(x * TILE_WIDTH + TILE_WIDTH / 2, y * TILE_WIDTH, text, {
+            font: "bold 36px Galmuri11, sans-serif",
+            color: "#ffffff",
+            padding: { x: 10, y: 6 },
+            backgroundColor: bg,
+          })
+          .setOrigin(0.5, 1)
+          .setDepth(2);
       });
 
       // *** ANIMATIONS (per persona) ***
@@ -325,15 +368,48 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       if (controlsRef) {
         controlsRef.current = {
           zoomIn: () =>
-            camera.setZoom(Phaser.Math.Clamp(camera.zoom + 0.15, 0.2, 2)),
+            camera.setZoom(Phaser.Math.Clamp(camera.zoom + 0.15, 0.3, 2)),
           zoomOut: () =>
-            camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.2, 2)),
+            camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.3, 2)),
+          setKeyboardEnabled: (on: boolean) => {
+            if (this.input.keyboard) this.input.keyboard.enabled = on;
+          },
         };
       }
     }
 
-    function setLabel(under: string, original: string) {
-      labels[under]?.setText(initialsOf(original));
+    // ponytail: trade card tags stored per-persona, created lazily
+    const tradeCards: Record<string, Phaser.GameObjects.Text> = {};
+
+    function setLabel(under: string, original: string, description?: string) {
+      const alias = ALIAS_MAP[under] || original;
+      labels[under]?.setText(alias);
+      // Show/update trade card when the description mentions 매매/거래소
+      if (description && /거래소|매수|매도|관망/.test(description)) {
+        const sprite = personaSprites[under];
+        if (!sprite) return;
+        const body = sprite.body as Phaser.Physics.Arcade.Body;
+        if (!tradeCards[under]) {
+          tradeCards[under] = sceneRef.add
+            .text(body.x, body.y - 100, "", {
+              font: "bold 24px Galmuri11, sans-serif",
+              color: "#ffffff",
+              padding: { x: 8, y: 4 },
+              backgroundColor: "#00000099",
+            })
+            .setOrigin(0.5, 1)
+            .setDepth(4);
+        }
+        // Color by action type
+        const isBuy = /매수/.test(description);
+        const isSell = /매도/.test(description);
+        const bg = isBuy ? "#2E7D32cc" : isSell ? "#C62828cc" : "#555555cc";
+        tradeCards[under].setBackgroundColor(bg);
+        tradeCards[under].setText(description);
+        tradeCards[under].setVisible(true);
+      } else if (tradeCards[under]) {
+        tradeCards[under].setVisible(false);
+      }
     }
 
     // Moves one persona one frame toward its target.
@@ -367,6 +443,11 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       if (label) {
         label.x = body.x - 6;
         label.y = body.y - 74;
+      }
+      const card = tradeCards[under];
+      if (card) {
+        card.x = body.x - 6;
+        card.y = body.y - 100;
       }
 
       if (animsDirection === "l") sprite.anims.play(`${under}-left-walk`, true);
@@ -460,7 +541,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
           if (executeCount === executeCountMax && unit) {
             const [cx, cy] = unit.movement;
             movementTarget[under] = [cx * TILE_WIDTH, cy * TILE_WIDTH];
-            setLabel(under, p.original);
+            setLabel(under, p.original, unit?.description);
           }
           if (executeCount > 0) {
             stepPersona(under);
