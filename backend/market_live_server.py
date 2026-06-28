@@ -44,6 +44,10 @@ from path_finder import path_finder  # noqa: E402  (path util)
 from utils import collision_block_id  # noqa: E402  (config)
 
 from backend.sim.engine import GameSession  # noqa: E402
+from backend.sim.models import Asset  # noqa: E402
+
+# ponytail: lazy import — listup is at repo root, imported at runtime only
+sys.path.insert(0, _REPO)
 
 # --------------------------------------------------------------------------- #
 # the_ville location mapping (use existing places).
@@ -100,9 +104,9 @@ def _maze() -> Maze:
 class Live:
     """Holds one live game: the engine session + the current movement timeline."""
 
-    def __init__(self, sim_code: str):
+    def __init__(self, sim_code: str, assets=None, seed: int = 42):
         self.sim_code = sim_code
-        self.game = GameSession()
+        self.game = GameSession(assets=assets, seed=seed)
         self.homes = self._load_homes()  # original name -> (x, y)
         # engine agent -> reverie persona (original/underscore) via sprite filename
         self.persona = []  # list of {agent, original, underscore, initial, home}
@@ -321,7 +325,37 @@ class Live:
         return {"<step>": step, "persona": persona, "meta": meta}
 
 
-_LIVE: Live | None = None
+def load_assets_from_artifact(artifact: dict) -> list[Asset]:
+    """Build Asset models from a listup artifact dict (same shape as default_assets.json)."""
+    out = []
+    for a in artifact.get("assets", []):
+        price = float(a.get("price") or 0.0)
+        out.append(Asset(
+            symbol=a["symbol"], name=a.get("name", a["symbol"]),
+            price=price, change24h=float(a.get("change24h") or 0.0),
+            volume=float(a.get("volume") or 0.0), priceHistory=[price],
+            sector=a.get("sector", ""),
+        ))
+    return out
+
+
+_SESSIONS: dict[str, Live] = {}  # uid -> Live
+
+
+def _get_live(uid: str | None) -> Live | None:
+    if uid and uid in _SESSIONS:
+        return _SESSIONS[uid]
+    # fallback: return the most recently created session (single-player compat)
+    return next(iter(reversed(_SESSIONS.values())), None) if _SESSIONS else None
+
+
+def _fetch_assets_from_upbit() -> dict | None:
+    """Run listup.build_artifact() to get fresh Upbit prices. None on failure."""
+    try:
+        import listup  # noqa: E402 — repo root, added to sys.path above
+        return listup.build_artifact()
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -330,21 +364,25 @@ _LIVE: Live | None = None
 class StartBody(BaseModel):
     fork_sim_code: str | None = None
     sim_code: str
+    seed: int | None = None  # optional user-specified seed
 
 
 class EventBody(BaseModel):
+    uid: str | None = None
     text: str
     is_rumor: bool = False
     source: str = "user"
 
 
 class StepBody(BaseModel):
+    uid: str | None = None
     step: int
     sim_code: str | None = None
     environment: dict | None = None
 
 
 class RunBody(BaseModel):
+    uid: str | None = None
     count: int = 0
 
 
@@ -352,84 +390,127 @@ class RunBody(BaseModel):
 # Control endpoints
 # --------------------------------------------------------------------------- #
 @app.get("/control/status")
-def control_status():
-    if _LIVE is None:
+def control_status(uid: str | None = None):
+    live = _get_live(uid)
+    if live is None:
         return {"loaded": False, "sim_code": None, "round": None,
                 "running_steps": False, "timeline_len": 0}
-    return {"loaded": True, "sim_code": _LIVE.sim_code, "round": _LIVE.game.round,
-            "running_steps": False, "timeline_len": len(_LIVE.timeline)}
+    return {"loaded": True, "sim_code": live.sim_code, "uid": uid,
+            "round": live.game.round,
+            "running_steps": False, "timeline_len": len(live.timeline)}
 
 
 @app.post("/control/start")
 def control_start(body: StartBody):
-    global _LIVE
+    from backend import db  # lazy import
+
     _maze()  # warm the maze once
-    _LIVE = Live(body.sim_code)
-    return {"status": "started", "sim_code": _LIVE.sim_code, "step": 0}
+
+    # 1. Fetch fresh assets from Upbit, fallback to existing default_assets.json
+    artifact = _fetch_assets_from_upbit()
+    if artifact is None:
+        # fallback: load from disk
+        default_path = os.path.join(_REPO, "default_assets.json")
+        with open(default_path, encoding="utf-8") as f:
+            artifact = json.load(f)
+
+    # 2. Determine seed
+    seed = body.seed if body.seed is not None else int.from_bytes(os.urandom(4), "big")
+
+    # 3. Save to MongoDB, get UUID
+    uid = db.create_session(artifact, seed=seed)
+
+    # 4. Build Asset models from the artifact
+    assets = load_assets_from_artifact(artifact)
+
+    # 5. Create Live session
+    live = Live(body.sim_code, assets=assets, seed=seed)
+    _SESSIONS[uid] = live
+
+    return {"status": "started", "sim_code": live.sim_code, "uid": uid, "seed": seed, "step": 0}
 
 
 @app.post("/control/market/event")
 def control_market_event(body: EventBody):
-    if _LIVE is None:
+    live = _get_live(body.uid)
+    if live is None:
         return {"status": "error", "error": "not started"}
-    if _LIVE.game.finished:
-        return {"status": "finished", "round": _LIVE.game.round,
+    if live.game.finished:
+        return {"status": "finished", "round": live.game.round,
                 "error": "5 라운드 종료 — 재시작하세요"}
-    # Snapshot BEFORE the round so the UI can ramp market/prices from here to the
-    # post-round values across the day animation (numbers move in sync with movement).
-    _LIVE.start_market = _LIVE.game.market.model_dump()
-    _LIVE.start_prices = {a.symbol: a.price for a in _LIVE.game.assets}
+    live.start_market = live.game.market.model_dump()
+    live.start_prices = {a.symbol: a.price for a in live.game.assets}
     try:
-        _LIVE.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
+        live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
     except RuntimeError as e:
-        return {"status": "finished", "round": _LIVE.game.round, "error": str(e)}
-    except Exception as e:  # transient LLM/data hiccup -> don't 500
-        return {"status": "error", "round": _LIVE.game.round, "error": str(e)[:200]}
-    _st = _LIVE.game.state()
-    _LIVE.final_market = _st["market"]
-    _LIVE.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
-    try:
-        _LIVE.build_timeline()
+        return {"status": "finished", "round": live.game.round, "error": str(e)}
     except Exception as e:
-        return {"status": "error", "round": _LIVE.game.round, "error": f"timeline: {str(e)[:160]}"}
-    ev = _LIVE.game.events[0] if _LIVE.game.events else None
-    return {"status": "ok", "round": _LIVE.game.round,
+        return {"status": "error", "round": live.game.round, "error": str(e)[:200]}
+    _st = live.game.state()
+    live.final_market = _st["market"]
+    live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
+    try:
+        live.build_timeline()
+    except Exception as e:
+        return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
+
+    # persist game state to DB
+    try:
+        from backend import db
+        db.save_game_state(body.uid, _st) if body.uid else None
+    except Exception:
+        pass  # ponytail: DB save is best-effort, game continues
+
+    ev = live.game.events[0] if live.game.events else None
+    return {"status": "ok", "round": live.game.round,
             "event": ev.text if ev else body.text,
             "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
 
 
 @app.get("/control/market/state")
-def control_market_state():
-    if _LIVE is None:
+def control_market_state(uid: str | None = None):
+    live = _get_live(uid)
+    if live is None:
         return {"ready": False}
-    st = _LIVE.game.state()
+    st = live.game.state()
     st["ready"] = True
     return st
 
 
 @app.get("/control/report/overall")
-def control_report_overall():
+def control_report_overall(uid: str | None = None):
     """FR-9/FR-10: overall report + achievements (shown when 5 rounds finish)."""
-    if _LIVE is None:
+    live = _get_live(uid)
+    if live is None:
         return {"ready": False}
-    rep = _LIVE.game.overall_report()
-    return {"ready": True, "finished": _LIVE.game.finished, "report": rep.model_dump()}
+    rep = live.game.overall_report()
+    return {"ready": True, "finished": live.game.finished, "report": rep.model_dump()}
 
 
 @app.post("/control/run")
 def control_run(body: RunBody):
-    # Timeline is built on the event; nothing to run here. Kept for FE compat.
     return {"status": "ok", "count": body.count}
+
+
+@app.get("/control/sessions")
+def control_sessions():
+    """List active in-memory sessions."""
+    return [
+        {"uid": uid, "sim_code": s.sim_code, "round": s.game.round,
+         "finished": s.game.finished}
+        for uid, s in _SESSIONS.items()
+    ]
 
 
 # --------------------------------------------------------------------------- #
 # Data (map/movement) endpoints
 # --------------------------------------------------------------------------- #
 @app.get("/api/home")
-def api_home():
-    if _LIVE is None:
+def api_home(uid: str | None = None):
+    live = _get_live(uid)
+    if live is None:
         return {"error": "backend_not_started"}
-    return _LIVE.home_payload()
+    return live.home_payload()
 
 
 @app.post("/api/environment/process")
@@ -439,6 +520,7 @@ def api_env_process(body: StepBody):
 
 @app.post("/api/environment/update")
 def api_env_update(body: StepBody):
-    if _LIVE is None:
+    live = _get_live(body.uid)
+    if live is None:
         return {"<step>": -1}
-    return _LIVE.movement_payload(body.step)
+    return live.movement_payload(body.step)
