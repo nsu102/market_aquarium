@@ -1,6 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+
+/* ── Relative time helper ── */
+function _relativeTime(ts?: number): string {
+  if (!ts) return "";
+  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diff < 5) return "방금 전";
+  if (diff < 60) return `${diff}초 전`;
+  const min = Math.floor(diff / 60);
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  return `${hr}시간 전`;
+}
 import { Post } from "@/mock_data/posts";
 import { GameEvent } from "@/mock_data/events";
 import { Agent } from "@/mock_data/agents";
@@ -51,10 +63,29 @@ export default function BoardFeed({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // post id -> comment count last seen by the user (for the "new comment" 느낌표).
   const [seen, setSeen] = useState<Record<string, number>>({});
+  // Track when each post/comment first appeared (real wall-clock time)
+  const firstSeenRef = useRef<Map<string, number>>(new Map());
+  // Tick every 30s so relative times refresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(iv);
+  }, []);
   // ids whose like/comment counter just increased -> brief bump animation.
   const [bumpedLike, setBumpedLike] = useState<Set<string>>(new Set());
   const [bumpedComment, setBumpedComment] = useState<Set<string>>(new Set());
   const prevCounts = useRef<Record<string, { likes: number; comments: number }>>({});
+
+  // Record real wall-clock time when posts/comments first appear
+  useEffect(() => {
+    const now = Date.now();
+    for (const p of posts) {
+      if (!firstSeenRef.current.has(p.id)) firstSeenRef.current.set(p.id, now);
+      for (const c of p.comments) {
+        if (c.id && !firstSeenRef.current.has(c.id)) firstSeenRef.current.set(c.id, now);
+      }
+    }
+  }, [posts]);
 
   // Baseline each post's comment count the first time we see it, so old comments
   // don't all flash the 느낌표; only later increases flag as "new".
@@ -139,6 +170,7 @@ export default function BoardFeed({
         snsAgents={snsAgents}
         onVote={onVote}
         onPost={onPost}
+        firstSeen={firstSeenRef.current}
       />
     </div>
   );
@@ -158,6 +190,7 @@ function FeedTab({
   snsAgents,
   onVote,
   onPost,
+  firstSeen,
 }: {
   posts: Post[];
   latestEvent: GameEvent | null;
@@ -171,6 +204,7 @@ function FeedTab({
   snsAgents: Agent[];
   onVote?: (input: BoardVoteInput) => void;
   onPost?: (input: BoardComposeInput) => void;
+  firstSeen?: Map<string, number>;
 }) {
   const mentionList = useMemo(() => [...agents, ...snsAgents], [agents, snsAgents]);
 
@@ -189,12 +223,24 @@ function FeedTab({
       mentionList={mentionList}
       onVote={onVote}
       onPost={onPost}
+      firstSeen={firstSeen}
     />
   );
 
+  const feedRef = useRef<HTMLDivElement>(null);
+  const prevPostLen = useRef(sorted.length);
+
+  // Auto-scroll to top when new posts arrive
+  useEffect(() => {
+    if (sorted.length > prevPostLen.current && feedRef.current) {
+      feedRef.current.scrollTop = 0;
+    }
+    prevPostLen.current = sorted.length;
+  }, [sorted.length]);
+
   return (
     <>
-      <div className="flex-1 overflow-y-auto bg-pixel-wall px-3">
+      <div ref={feedRef} className="flex-1 overflow-y-auto bg-pixel-wall px-3">
         {/* News card */}
         {latestEvent && (
           <div className="pt-3">
@@ -244,6 +290,7 @@ function PostCard({
   bumpComment,
   mentionList,
   onVote,
+  firstSeen,
   onPost,
 }: {
   post: Post;
@@ -255,11 +302,13 @@ function PostCard({
   mentionList: Agent[];
   onVote?: (input: BoardVoteInput) => void;
   onPost?: (input: BoardComposeInput) => void;
+  firstSeen?: Map<string, number>;
 }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const Icon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
   const profileSrc = getProfileImg(post.agentId);
   const isUser = post.is_user;
+  const timeLabel = _relativeTime(firstSeen?.get(post.id));
 
   return (
     <div className="pt-3 last:pb-3">
@@ -287,7 +336,7 @@ function PostCard({
               )}
             </div>
             <div className="text-[10px] text-pixel-muted">
-              R{post.round} {post.timestamp}
+              R{post.round} · {timeLabel}
             </div>
           </div>
           {/* 새 댓글 느낌표 */}
