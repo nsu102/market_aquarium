@@ -36,6 +36,7 @@ import {
   type ProcessEnvironmentBody,
   type ReverieMeta,
 } from "@/lib/reverieApi";
+import { parseTradeLabel, type TradeBubble } from "@/constants/trade";
 
 const TILE_WIDTH = 32;
 const CURR_MAZE = "the_ville";
@@ -150,9 +151,21 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
 
     const personaSprites: Record<string, Phaser.GameObjects.Sprite> = {};
     const labels: Record<string, Phaser.GameObjects.Text> = {};
+    // Per-persona trade speech bubble (drawn above the character on the step it
+    // reaches the exchange and trades). Hidden until a trade label appears.
+    const tradeBubbles: Record<string, Phaser.GameObjects.Container> = {};
+    const tradeBubbleText: Record<string, Phaser.GameObjects.Text> = {};
+    const tradeBubbleGfx: Record<string, Phaser.GameObjects.Graphics> = {};
+    const tradeHideTimers: Record<string, Phaser.Time.TimerEvent> = {};
+    // Last movement description seen per persona, so the bubble fires only on the
+    // transition INTO a trade label (not on every linger step at the exchange).
+    const lastDesc: Record<string, string> = {};
     const movementTarget: Record<string, [number, number]> = {};
     const preAnimsDir: Record<string, string> = {};
     let animsDirection = "";
+    // Scene ref captured in create(); needed for time.delayedCall in the loop,
+    // which is not bound to `this`.
+    let scene: Phaser.Scene;
 
     let player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
     let cursors: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -195,6 +208,7 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
     }
 
     function create(this: Phaser.Scene) {
+      scene = this;
       const map = this.make.tilemap({ key: "map" });
 
       const collisions = map.addTilesetImage("blocks", "blocks_1")!;
@@ -296,6 +310,19 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
             backgroundColor: "#ffffff",
           })
           .setDepth(3);
+
+        // Trade speech bubble above the character (hidden until a trade fires).
+        // Sized to its text in showTradeBubble; tail points down at the head.
+        const bubbleGfx = this.add.graphics();
+        const bubbleTxt = this.add
+          .text(0, 0, "", { font: "bold 13px monospace", color: "#1E1A17" })
+          .setOrigin(0.5);
+        tradeBubbles[name] = this.add
+          .container(sprite.body.x + 9, sprite.body.y - 88, [bubbleGfx, bubbleTxt])
+          .setDepth(5)
+          .setVisible(false);
+        tradeBubbleText[name] = bubbleTxt;
+        tradeBubbleGfx[name] = bubbleGfx;
       });
 
       // *** ANIMATIONS (per persona) ***
@@ -335,6 +362,42 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
       labels[under]?.setText(initialsOf(original));
     }
 
+    // Draw + show a trade speech bubble above a character, auto-hiding after a
+    // short hold. A re-shown bubble cancels its previous hide timer.
+    function showTradeBubble(under: string, bubble: TradeBubble) {
+      const container = tradeBubbles[under];
+      const txt = tradeBubbleText[under];
+      const gfx = tradeBubbleGfx[under];
+      if (!container || !txt || !gfx) return;
+
+      txt.setText(bubble.text).setColor(bubble.color);
+      const padX = 8;
+      const padY = 5;
+      const w = Math.ceil(txt.width) + padX * 2;
+      const h = Math.ceil(txt.height) + padY * 2;
+      const accent = parseInt(bubble.color.slice(1), 16);
+
+      gfx.clear();
+      gfx.fillStyle(0xffffff, 1);
+      gfx.lineStyle(2, accent, 1);
+      gfx.fillRoundedRect(-w / 2, -h, w, h, 6);
+      gfx.strokeRoundedRect(-w / 2, -h, w, h, 6);
+      // Tail pointing down toward the character's head (overlap 1px to hide the
+      // seam where it meets the rounded box's bottom border).
+      gfx.fillStyle(0xffffff, 1);
+      gfx.fillTriangle(-5, -1, 5, -1, 0, 6);
+      gfx.lineStyle(2, accent, 1);
+      gfx.lineBetween(-5, -1, 0, 6);
+      gfx.lineBetween(5, -1, 0, 6);
+
+      txt.setPosition(0, -h / 2);
+      container.setVisible(true);
+      tradeHideTimers[under]?.remove();
+      tradeHideTimers[under] = scene.time.delayedCall(2400, () =>
+        container.setVisible(false)
+      );
+    }
+
     // Moves one persona one frame toward its target.
     function stepPersona(under: string) {
       const sprite = personaSprites[under];
@@ -366,6 +429,12 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
       if (label) {
         label.x = body.x - 6;
         label.y = body.y - 74;
+      }
+
+      const bubble = tradeBubbles[under];
+      if (bubble) {
+        bubble.x = body.x + 9;
+        bubble.y = body.y - 88;
       }
 
       if (animsDirection === "l") sprite.anims.play(`${under}-left-walk`, true);
@@ -460,6 +529,13 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
             const [cx, cy] = unit.movement;
             movementTarget[under] = [cx * TILE_WIDTH, cy * TILE_WIDTH];
             setLabel(under, p.original);
+            // Fire the trade bubble once, on the step the description transitions
+            // INTO a trade label (reaching the exchange), not on every linger step.
+            const tb = parseTradeLabel(unit.description);
+            if (tb && unit.description !== lastDesc[under]) {
+              showTradeBubble(under, tb);
+            }
+            lastDesc[under] = unit.description;
           }
           if (executeCount > 0) {
             stepPersona(under);
