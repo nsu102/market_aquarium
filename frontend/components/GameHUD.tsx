@@ -88,9 +88,13 @@ export default function GameHUD({
     "비트코인 반감기가 한 달 앞으로 다가왔다",
   ];
 
-  const [placeholder] = useState(
+  const [placeholder, setPlaceholder] = useState(
     () => EVENT_PRESETS[Math.floor(Math.random() * EVENT_PRESETS.length)]
   );
+
+  useEffect(() => {
+    setPlaceholder(EVENT_PRESETS[Math.floor(Math.random() * EVENT_PRESETS.length)]);
+  }, [round]);
 
   const closeEvent = () => {
     setEventOpen(false);
@@ -107,14 +111,9 @@ export default function GameHUD({
   return (
     <>
       {/* ── Top-left: Logo ── */}
-      <div className="absolute top-4 left-4 z-40">
-        <div className="flex items-center gap-2 bg-white border-2 border-black rounded-xl px-3 py-2 shadow-pixel-sm">
-          <Fish size={18} className="text-pixel-greenText" />
-          <span className="text-sm font-bold text-black tracking-wide pixel-title">
-            MARKET AQUARIUM
-          </span>
-        </div>
-      </div>
+      {/* <div className="absolute top-4 left-4 z-40">
+        <img src="/img/title_image.png" alt="Market Aquarium" className="h-20" />
+      </div> */}
 
       {/* ── Bottom-center: Toolbar ── */}
       <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40">
@@ -186,41 +185,45 @@ export default function GameHUD({
 
       {/* ── Event input overlay ── */}
       {eventOpen && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 w-[520px] max-w-[90vw] animate-slide-up">
-          <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Zap size={14} className="text-pixel-greenText" />
-              <span className="text-[11px] text-black font-bold tracking-wider">GLOBAL EVENT</span>
-              <div className="flex-1" />
-              <button
-                onClick={closeEvent}
-                aria-label="닫기"
-                className="w-6 h-6 border-2 border-black rounded-lg bg-white flex items-center justify-center text-black hover:bg-pixel-danger hover:text-white cursor-pointer"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={eventText}
-                onChange={(e) => setEventText(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") submit();
-                }}
-                onFocus={() => onKeyboardEnabled?.(false)}
-                onBlur={() => onKeyboardEnabled?.(true)}
-                placeholder={placeholder}
-                autoFocus
-                className="flex-1 bg-white border-2 border-black rounded-lg px-3 py-2 text-sm text-black placeholder:text-pixel-muted focus:outline-none focus:bg-pixel-path"
-              />
-              <button
-                onClick={submit}
-                className="px-4 py-2 bg-pixel-grass border-2 border-black rounded-lg text-black text-sm font-bold hover:brightness-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
-              >
-                <Send size={13} />
-                <span>전송</span>
-              </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="w-[560px] max-w-[90vw]">
+            <div className="bg-white border-2 border-black rounded-2xl p-8 shadow-pixel-lg">
+              <div className="flex items-center gap-3 mb-2">
+                <Zap size={24} className="text-pixel-greenText" />
+                <span className="text-lg text-black font-bold tracking-wider font-pixel">GLOBAL EVENT</span>
+                <span className="ml-2 text-sm text-pixel-muted font-pixel">Round {round + 1}</span>
+                <div className="flex-1" />
+                <button
+                  onClick={closeEvent}
+                  aria-label="닫기"
+                  className="w-8 h-8 border-2 border-black rounded-lg bg-white flex items-center justify-center text-black hover:bg-pixel-danger hover:text-white cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="text-pixel-muted text-sm mb-4 font-pixel">이번 라운드의 글로벌 이벤트를 입력하세요. 비워두면 랜덤 이슈가 적용됩니다.</p>
+              <div className="flex gap-3">
+                <input
+                  value={eventText}
+                  onChange={(e) => setEventText(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") submit();
+                  }}
+                  onFocus={() => onKeyboardEnabled?.(false)}
+                  onBlur={() => onKeyboardEnabled?.(true)}
+                  placeholder={placeholder}
+                  autoFocus
+                  className="flex-1 bg-white border-2 border-black rounded-xl px-4 py-3 text-base text-black placeholder:text-pixel-muted focus:outline-none focus:border-pixel-greenText focus:bg-pixel-path"
+                />
+                <button
+                  onClick={submit}
+                  className="px-6 py-3 bg-pixel-grass border-2 border-black rounded-xl text-black text-base font-bold hover:brightness-110 cursor-pointer flex items-center gap-2 active:translate-y-[1px]"
+                >
+                  <Send size={16} />
+                  <span>전송</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -247,11 +250,10 @@ function ToolbarBtn({
   return (
     <button
       onClick={onClick}
-      className={`relative flex items-center gap-1.5 px-2.5 h-8 border-2 rounded-lg cursor-pointer text-[11px] font-bold active:translate-x-[1px] active:translate-y-[1px] ${
-        active
-          ? `${activeBg} text-black border-black`
-          : "bg-white text-pixel-muted border-black hover:bg-pixel-path hover:text-black"
-      }`}
+      className={`relative flex items-center gap-1.5 px-2.5 h-8 border-2 rounded-lg cursor-pointer text-[11px] font-bold active:translate-x-[1px] active:translate-y-[1px] ${active
+        ? `${activeBg} text-black border-black`
+        : "bg-white text-pixel-muted border-black hover:bg-pixel-path hover:text-black"
+        }`}
     >
       <Icon size={14} />
       <span className="hidden sm:inline">{label}</span>
