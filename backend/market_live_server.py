@@ -111,6 +111,13 @@ def _stable_int(text: str) -> int:
 # App + shared state
 # --------------------------------------------------------------------------- #
 app = FastAPI(title="Market Aquarium Live")
+
+# Pre-warm the sentiment model so the first event doesn't pay the load cost.
+import threading
+threading.Thread(
+    target=lambda: __import__("backend.sim.sentiment", fromlist=["_get_pipeline"])._get_pipeline(),
+    daemon=True,
+).start()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000",

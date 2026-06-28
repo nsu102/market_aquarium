@@ -265,23 +265,47 @@ class GameSession:
         min_threads = max(3, total_writers // 4)
         max_threads = max(min_threads + 1, total_writers // 2)
         sym2sector = {a.symbol: a.sector for a in self.assets}
-        # Plan §2: the round's first two agents may ONLY post (post_only), so the
-        # board always opens with real threads to comment on / vote for.
-        for i, ag in enumerate(self.agents):
+        # Plan §2: first 2 agents post-only (seed threads), then all others
+        # decide in parallel. Two-phase so comments have threads to target.
+        for ag in self.agents:
             ag.location = Location.COMMUNITY
+
+        def _agent_interests(ag):
             interests = [h.asset for h in ag.portfolio if h.amount > 0][:4]
             sectors = list(dict.fromkeys(s for s in (sym2sector.get(x, "") for x in interests) if s))
-            result = sns.view_sns(
+            return interests, sectors
+
+        # Phase 1: first 2 agents seed threads (parallel)
+        openers = self.agents[:2]
+        def _open(ag):
+            interests, sectors = _agent_interests(ag)
+            return ag, sns.view_sns(
                 self.client, ag, event, self.posts, rnd, timestamp=ts,
-                interests=interests, sectors=sectors, post_only=(i < 2),
+                interests=interests, sectors=sectors, post_only=True,
                 min_round_threads=min_threads, max_round_threads=max_threads,
             )
-            sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
-        for ag in self.sns_agents:
-            result = sns.view_sns(
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for ag, result in ex.map(_open, openers):
+                sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
+
+        # Phase 2: remaining agents + sns spectators decide in parallel
+        rest_agents = self.agents[2:]
+        def _write_agent(ag):
+            interests, sectors = _agent_interests(ag)
+            return ag, sns.view_sns(
+                self.client, ag, event, self.posts, rnd, timestamp=ts,
+                interests=interests, sectors=sectors, post_only=False,
+                min_round_threads=min_threads, max_round_threads=max_threads,
+            )
+        def _write_sns(ag):
+            return ag, sns.view_sns(
                 self.client, ag, event, self.posts, rnd, timestamp=ts, force=True,
                 min_round_threads=min_threads, max_round_threads=max_threads,
             )
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futs_agents = list(ex.map(_write_agent, rest_agents))
+            futs_sns = list(ex.map(_write_sns, self.sns_agents))
+        for ag, result in futs_agents + futs_sns:
             sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
 
         # SNS spectators cast their like/dislike votes on this round's posts.
@@ -320,7 +344,7 @@ class GameSession:
         self.market = market_state.compute_market_data(
             self.agents, self.assets, trades, posts_count=len([p for p in self.posts if p.round == rnd])
         )
-        rr = report.build_round_report(rnd, self.market, breakdowns, self.agents, trades)
+        rr = report.build_round_report(rnd, self.market, breakdowns, self.agents, trades, self._emotion_deltas())
         self.round_reports.append(rr)
 
         # Per-agent round summary so the frontend can choreograph movement:
