@@ -13,7 +13,7 @@ import time
 import urllib.request
 
 API = "http://127.0.0.1:8000"
-CTRL = "http://127.0.0.1:8001"
+CTRL = "http://127.0.0.1:8000"
 STEPS = 1300  # > one in-game day (1200) so we cross midnight -> end_round
 
 

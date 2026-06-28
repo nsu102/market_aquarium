@@ -19,29 +19,14 @@ import { AGENT_ICONS } from "@/lib/agentIcons";
 
 const tabs = ["전체", "BTC", "ETH", "SOL"];
 
-/** impact → notice 배너 색상 토큰 (기존 Tailwind 팔레트 사용). */
+/** impact → notice 배너 톤 (2-Hue) */
 const IMPACT_STYLES: Record<
   GameEvent["impact"],
-  { wrap: string; icon: string; label: string; labelText: string }
+  { bg: string; labelText: string }
 > = {
-  negative: {
-    wrap: "bg-accent-red/8 border-accent-red/25",
-    icon: "text-accent-red",
-    label: "bg-accent-red/12 text-accent-red",
-    labelText: "속보",
-  },
-  positive: {
-    wrap: "bg-accent-green/8 border-accent-green/25",
-    icon: "text-accent-green",
-    label: "bg-accent-green/12 text-accent-green",
-    labelText: "속보",
-  },
-  neutral: {
-    wrap: "bg-surface-secondary border-border-light",
-    icon: "text-text-secondary",
-    label: "bg-surface-tertiary text-text-secondary",
-    labelText: "공지",
-  },
+  negative: { bg: "bg-pixel-danger", labelText: "속보" },
+  positive: { bg: "bg-pixel-grass", labelText: "속보" },
+  neutral: { bg: "bg-pixel-path", labelText: "공지" },
 };
 
 export default function BoardFeed({
@@ -54,19 +39,23 @@ export default function BoardFeed({
   const [activeTab, setActiveTab] = useState("전체");
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
-  const [time, setTime] = useState(() => new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }));
+  const [time, setTime] = useState(() =>
+    new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })
+  );
 
   useEffect(() => {
-    const id = setInterval(() => setTime(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })), 10000);
+    const id = setInterval(
+      () =>
+        setTime(
+          new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })
+        ),
+      10000
+    );
     return () => clearInterval(id);
   }, []);
 
-  const filtered =
-    activeTab === "전체"
-      ? posts
-      : posts.filter((p) => p.asset === activeTab);
+  const filtered = activeTab === "전체" ? posts : posts.filter((p) => p.asset === activeTab);
 
-  // 최신 이벤트가 마지막에 들어온다고 가정: 가장 최근 1건을 크게, 이전 건은 작게.
   const latestEvent = events.length > 0 ? events[events.length - 1] : null;
   const priorEvents = events.length > 1 ? events.slice(0, -1).slice(-3).reverse() : [];
 
@@ -89,220 +78,217 @@ export default function BoardFeed({
   };
 
   return (
-    <div className="h-full flex flex-col items-center justify-center bg-surface-tertiary/40 py-3 px-3">
-      {/* Phone device */}
-      <div className="flex flex-col w-full h-full max-w-[340px] rounded-[2.5rem] border-[3px] border-text-primary/12 bg-surface-card overflow-hidden shadow-phone relative">
+    <div className="h-full flex items-center justify-center py-2">
+      {/* ── Phone device: 딥그린 베젤(검정 아님) + 둥근 화면 ── */}
+      <div className="relative w-full h-full max-w-[330px] max-h-full bg-pixel-ink rounded-[40px] p-2.5 shadow-pixel-lg border-2 border-black">
+        {/* Side buttons */}
+        <div className="absolute -left-[3px] top-[110px] w-[3px] h-9 rounded-l bg-pixel-inkSoft" />
+        <div className="absolute -left-[3px] top-[160px] w-[3px] h-14 rounded-l bg-pixel-inkSoft" />
+        <div className="absolute -right-[3px] top-[140px] w-[3px] h-16 rounded-r bg-pixel-inkSoft" />
 
-        {/* Notch area */}
-        <div className="bg-surface-card px-6 pt-2.5 pb-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-text-secondary font-mono font-semibold">{time}</span>
-            <div className="w-[72px] h-[20px] bg-text-primary rounded-full" />
-            <div className="flex items-center gap-1 text-text-secondary">
-              <Signal size={10} strokeWidth={2.5} />
-              <Wifi size={10} strokeWidth={2.5} />
-              <Battery size={10} strokeWidth={2.5} />
+        {/* Screen */}
+        <div className="relative w-full h-full bg-white rounded-[30px] overflow-hidden flex flex-col">
+          {/* Status bar (위로 노치 공간 확보) */}
+          <div className="relative flex items-center justify-between px-6 pt-2.5 pb-1.5 bg-white text-pixel-ink z-20">
+            <span className="text-[12px] font-bold tracking-tight">{time}</span>
+            <div className="flex items-center gap-1.5">
+              <Signal size={13} strokeWidth={2.5} />
+              <Wifi size={13} strokeWidth={2.5} />
+              <Battery size={14} strokeWidth={2.5} />
             </div>
           </div>
-        </div>
 
-        {/* App header */}
-        <div className="px-5 pt-3 pb-2 bg-surface-card">
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-[17px] font-bold text-text-primary tracking-tight">
-              투자 게시판
-            </h3>
-            <button className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-text-tertiary hover:text-text-secondary transition cursor-pointer">
-              <Search size={15} />
-            </button>
+          {/* Dynamic island (노치) */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-[92px] h-[26px] bg-pixel-ink rounded-full z-30 flex items-center justify-end pr-2.5">
+            <div className="w-[7px] h-[7px] rounded-full bg-pixel-inkSoft" />
           </div>
 
-          {/* Tabs - pill style */}
-          <div className="flex gap-1.5">
-            {tabs.map((t) => (
+          {/* App header */}
+          <div className="px-4 pt-2 pb-2.5 bg-pixel-table border-b-2 border-black">
+            <div className="flex items-center justify-between mb-2.5">
+              <h3 className="text-[17px] font-extrabold text-black tracking-tight">투자 게시판</h3>
               <button
-                key={t}
-                onClick={() => setActiveTab(t)}
-                className={`px-3 py-1.5 rounded-full text-[11px] font-semibold transition cursor-pointer ${
-                  activeTab === t
-                    ? "bg-text-primary text-surface-card"
-                    : "bg-surface-secondary text-text-tertiary hover:text-text-secondary hover:bg-surface-tertiary"
-                }`}
+                aria-label="검색"
+                className="w-8 h-8 rounded-full bg-white border-2 border-black flex items-center justify-center text-black hover:bg-pixel-path cursor-pointer active:translate-y-[1px]"
               >
-                {t}
+                <Search size={15} />
               </button>
-            ))}
+            </div>
+
+            {/* Tabs (pill) */}
+            <div className="flex gap-1.5">
+              {tabs.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setActiveTab(t)}
+                  className={`px-3 py-1 rounded-full border-2 border-black text-[11px] font-bold cursor-pointer transition-colors ${
+                    activeTab === t
+                      ? "bg-pixel-grass text-black"
+                      : "bg-white text-pixel-muted hover:bg-pixel-path"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Divider */}
-        <div className="h-px bg-border-light" />
-
-        {/* Scrollable region: pinned notice + tweet feed */}
-        <div className="flex-1 overflow-y-auto bg-surface-secondary/30">
-          {/* PINNED NOTICE — 이벤트 공지 배너 (트윗과 시각적으로 구분) */}
-          {latestEvent && (
-            <div className="px-3 pt-3 pb-1 bg-surface-secondary/30">
-              {(() => {
-                const s = IMPACT_STYLES[latestEvent.impact];
-                return (
-                  <div className={`rounded-2xl border ${s.wrap} px-3.5 py-3`}>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <Megaphone size={14} className={s.icon} strokeWidth={2.2} />
-                      <span
-                        className={`text-[9px] font-bold px-1.5 py-[2px] rounded-md tracking-wide ${s.label}`}
-                      >
-                        {s.labelText}
-                      </span>
-                      <span className="text-[9px] text-text-tertiary font-mono ml-auto">
-                        R{latestEvent.round} {latestEvent.timestamp}
-                      </span>
-                    </div>
-                    <p className="text-[12.5px] font-semibold text-text-primary leading-[1.5]">
-                      {latestEvent.text}
-                    </p>
-                    {priorEvents.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-border-light/60 space-y-1">
-                        {priorEvents.map((ev) => (
-                          <div
-                            key={ev.id}
-                            className="flex items-baseline gap-1.5 text-[10px] text-text-tertiary"
-                          >
-                            <span className="font-mono shrink-0">R{ev.round}</span>
-                            <span className="truncate leading-[1.4]">{ev.text}</span>
+          {/* Feed */}
+          <div className="flex-1 overflow-y-auto bg-pixel-wall px-3">
+            {/* Pinned notice */}
+            {latestEvent && (
+              <div className="pt-3">
+                {(() => {
+                  const s = IMPACT_STYLES[latestEvent.impact];
+                  return (
+                    <div className="border-2 border-black rounded-2xl bg-white overflow-hidden shadow-pixel-sm">
+                      <div className={`flex items-center gap-2 px-3 py-1.5 border-b-2 border-black ${s.bg}`}>
+                        <Megaphone size={14} className="text-black" strokeWidth={2.2} />
+                        <span className="text-[9px] font-bold px-2 py-[2px] rounded-full border-2 border-black bg-white text-black tracking-wide">
+                          {s.labelText}
+                        </span>
+                        <span className="text-[9px] text-black font-bold ml-auto">
+                          R{latestEvent.round} {latestEvent.timestamp}
+                        </span>
+                      </div>
+                      <div className="px-3 py-2.5">
+                        <p className="text-[12.5px] font-bold text-black leading-[1.5]">{latestEvent.text}</p>
+                        {priorEvents.length > 0 && (
+                          <div className="mt-2 pt-2 border-t-2 border-black/10 space-y-1">
+                            {priorEvents.map((ev) => (
+                              <div
+                                key={ev.id}
+                                className="flex items-baseline gap-1.5 text-[10px] text-pixel-muted"
+                              >
+                                <span className="font-bold shrink-0">R{ev.round}</span>
+                                <span className="truncate leading-[1.4]">{ev.text}</span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Posts */}
+            {filtered.map((post) => {
+              const AgentIcon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
+              const liked = likedPosts.has(post.id);
+              const showComments = expandedComments.has(post.id);
+
+              return (
+                <div key={post.id} className="pt-3 last:pb-3">
+                  <div className="bg-white border-2 border-black rounded-2xl p-3 shadow-pixel-sm">
+                    {/* Author row */}
+                    <div className="flex items-center gap-2.5 mb-2">
+                      <div className="w-9 h-9 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center text-black overflow-hidden">
+                        <AgentIcon size={16} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-bold text-black leading-tight">
+                          {post.agentAlias}
+                        </div>
+                        <div className="text-[10px] text-pixel-muted">
+                          R{post.round} {post.timestamp}
+                        </div>
+                      </div>
+                      <button className="text-pixel-muted hover:text-black cursor-pointer p-1">
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+
+                    {/* Content */}
+                    <p className="text-[13px] text-black leading-[1.6] mb-2.5">{post.content}</p>
+
+                    {/* Asset tag */}
+                    {post.asset && (
+                      <div className="mb-2.5">
+                        <span className="inline-block text-[10px] px-2.5 py-[3px] rounded-full border-2 border-black bg-pixel-water text-black font-bold">
+                          {post.asset}
+                        </span>
                       </div>
                     )}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
 
-          {/* TWEET FEED */}
-          {filtered.map((post, idx) => {
-            const AgentIcon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
-            const liked = likedPosts.has(post.id);
-            const showComments = expandedComments.has(post.id);
-
-            return (
-              <div
-                key={post.id}
-                className={`bg-surface-card px-4 py-3.5 ${
-                  idx < filtered.length - 1 ? "border-b border-border-light" : ""
-                }`}
-              >
-                {/* Author row */}
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-9 h-9 rounded-full bg-surface-secondary border border-border-light flex items-center justify-center text-text-secondary">
-                    <AgentIcon size={16} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-text-primary leading-tight">
-                      {post.agentAlias}
+                    {/* Action bar */}
+                    <div className="flex items-center justify-between text-pixel-muted">
+                      <div className="flex items-center gap-4">
+                        <button
+                          onClick={() => toggleLike(post.id)}
+                          className={`flex items-center gap-1 text-[11px] cursor-pointer ${
+                            liked ? "text-pixel-danger" : "hover:text-pixel-danger"
+                          }`}
+                        >
+                          <Heart size={14} fill={liked ? "currentColor" : "none"} strokeWidth={2} />
+                          <span className="font-bold">{post.likes + (liked ? 1 : 0)}</span>
+                        </button>
+                        <button
+                          onClick={() => toggleComments(post.id)}
+                          aria-expanded={showComments}
+                          className={`flex items-center gap-1 text-[11px] cursor-pointer ${
+                            showComments ? "text-pixel-blue" : "hover:text-pixel-blue"
+                          }`}
+                        >
+                          <MessageCircle size={14} strokeWidth={2} />
+                          <span className="font-bold">{post.comments.length}</span>
+                        </button>
+                        <button className="hover:text-pixel-blue cursor-pointer">
+                          <Share2 size={13} strokeWidth={2} />
+                        </button>
+                      </div>
+                      <button className="hover:text-pixel-gold cursor-pointer">
+                        <Bookmark size={14} strokeWidth={2} />
+                      </button>
                     </div>
-                    <div className="text-[10px] text-text-tertiary font-mono">
-                      R{post.round} {post.timestamp}
-                    </div>
-                  </div>
-                  <button className="text-text-tertiary hover:text-text-secondary transition cursor-pointer p-1">
-                    <MoreHorizontal size={14} />
-                  </button>
-                </div>
 
-                {/* Content */}
-                <p className="text-[13px] text-text-primary leading-[1.6] mb-2.5">
-                  {post.content}
-                </p>
+                    {/* Comments */}
+                    {showComments && (
+                      <div className="mt-3 pt-2.5 border-t-2 border-black/10 space-y-2.5">
+                        {post.comments.length === 0 ? (
+                          <p className="text-[11px] text-pixel-muted">아직 댓글이 없습니다</p>
+                        ) : (
+                          post.comments.map((c, i) => {
+                            const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
+                            return (
+                              <div key={i} className="flex items-start gap-2">
+                                <div className="w-6 h-6 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center flex-shrink-0 mt-0.5 text-black">
+                                  <CIcon size={11} />
+                                </div>
+                                <div className="flex-1 min-w-0 bg-pixel-wall rounded-2xl rounded-tl-md px-2.5 py-1.5">
+                                  <span className="text-[11px] font-bold text-black">{c.agentAlias}</span>
+                                  <p className="text-[11px] text-pixel-muted leading-[1.5] mt-0.5">
+                                    {c.content}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
 
-                {/* Asset tag */}
-                {post.asset && (
-                  <div className="mb-2.5">
-                    <span className="inline-block text-[10px] px-2 py-[3px] rounded-md bg-accent-green/8 text-accent-green font-semibold">
-                      {post.asset}
-                    </span>
-                  </div>
-                )}
-
-                {/* Action bar */}
-                <div className="flex items-center justify-between text-text-tertiary">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => toggleLike(post.id)}
-                      className={`flex items-center gap-1 text-[11px] transition cursor-pointer ${
-                        liked ? "text-accent-red" : "hover:text-accent-red"
-                      }`}
-                    >
-                      <Heart size={14} fill={liked ? "currentColor" : "none"} strokeWidth={1.8} />
-                      <span className="font-medium">{post.likes + (liked ? 1 : 0)}</span>
-                    </button>
-                    <button
-                      onClick={() => toggleComments(post.id)}
-                      aria-expanded={showComments}
-                      className={`flex items-center gap-1 text-[11px] transition cursor-pointer ${
-                        showComments ? "text-accent-blue" : "hover:text-accent-blue"
-                      }`}
-                    >
-                      <MessageCircle size={14} strokeWidth={1.8} />
-                      <span className="font-medium">{post.comments.length}</span>
-                    </button>
-                    <button className="hover:text-accent-blue transition cursor-pointer">
-                      <Share2 size={13} strokeWidth={1.8} />
-                    </button>
-                  </div>
-                  <button className="hover:text-accent-gold transition cursor-pointer">
-                    <Bookmark size={14} strokeWidth={1.8} />
-                  </button>
-                </div>
-
-                {/* Comments (per-post expandable) */}
-                {showComments && (
-                  <div className="mt-3 pt-2.5 border-t border-border-light space-y-2.5">
-                    {post.comments.length === 0 ? (
-                      <p className="text-[11px] text-text-tertiary">
-                        아직 댓글이 없습니다
-                      </p>
-                    ) : (
-                      post.comments.map((c, i) => {
-                        const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
-                        return (
-                          <div key={i} className="flex items-start gap-2">
-                            <div className="w-6 h-6 rounded-full bg-surface-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <CIcon size={11} className="text-text-tertiary" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-[11px] font-semibold text-text-primary">
-                                {c.agentAlias}
-                              </span>
-                              <p className="text-[11px] text-text-secondary leading-[1.5] mt-0.5">
-                                {c.content}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })
+                    {/* Comment peek */}
+                    {post.comments.length > 0 && !showComments && (
+                      <button
+                        onClick={() => toggleComments(post.id)}
+                        className="mt-2 text-[11px] text-pixel-muted hover:text-black cursor-pointer"
+                      >
+                        댓글 {post.comments.length}개 보기
+                      </button>
                     )}
                   </div>
-                )}
+                </div>
+              );
+            })}
+            <div className="h-3" />
+          </div>
 
-                {/* Comment peek */}
-                {post.comments.length > 0 && !showComments && (
-                  <button
-                    onClick={() => toggleComments(post.id)}
-                    className="mt-2 text-[11px] text-text-tertiary hover:text-text-secondary transition cursor-pointer"
-                  >
-                    댓글 {post.comments.length}개 보기
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Home indicator */}
-        <div className="flex justify-center py-2 bg-surface-card border-t border-border-light">
-          <div className="w-[100px] h-[4px] bg-text-primary/12 rounded-full" />
+          {/* Home indicator */}
+          <div className="flex justify-center py-2 bg-pixel-wall">
+            <div className="w-[110px] h-[5px] rounded-full bg-pixel-ink/40" />
+          </div>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import MarketPanel from "@/components/MarketPanel";
 import BoardFeed from "@/components/BoardFeed";
 import RoundReport from "@/components/RoundReport";
+import OverallReport from "@/components/OverallReport";
 import AgentDetail from "@/components/AgentDetail";
 import EventOverlay from "@/components/EventOverlay";
 import SetupScreen from "@/components/SetupScreen";
@@ -15,6 +16,7 @@ import { Post } from "@/mock_data/posts";
 import { rounds } from "@/mock_data/rounds";
 import { GameEvent } from "@/mock_data/events";
 import * as control from "@/lib/control";
+import { Loader2 } from "lucide-react";
 import type { ReverieMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
 
@@ -63,9 +65,19 @@ export default function Home() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
+  // True while a round is being computed on the backend (LLM, ~10-30s).
+  const [computing, setComputing] = useState(false);
   // Live reverie sim code, set once fork + run resolve.
   const [canonicalSim, setCanonicalSim] = useState<string | null>(null);
   const reverieControlsRef = useRef<GameControls | null>(null);
+  // Real round report (from meta) + end-of-game overall report.
+  const [roundReport, setRoundReport] =
+    useState<NonNullable<ReverieMeta["round_report"]> | null>(null);
+  const [overall, setOverall] = useState<{
+    markdown: string;
+    achievements: control.OverallAchievement[];
+  } | null>(null);
+  const overallFetchedRef = useRef(false);
 
   /** Optimistic seed so the panels aren't empty before live data arrives. */
   const seedFromSetup = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
@@ -90,6 +102,10 @@ export default function Home() {
       seedFromSetup(setupAgents, setupAssets);
       setCanonicalSim(null);
       setGameStarted(true);
+      // Reset report state for the new game.
+      setRoundReport(null);
+      setOverall(null);
+      overallFetchedRef.current = false;
 
       // Canonical/live path: ONLY fork the reverie sim so the map renders
       // immediately with agents standing idle at their spawn tiles. We do NOT
@@ -115,6 +131,20 @@ export default function Home() {
     if (meta.posts) setPosts(meta.posts);
     if (meta.events) setEvents(meta.events);
     if (typeof meta.round === "number") setCurrentRound(meta.round);
+    // Live agents (pre-computed portfolio + live cash/fear/greed/lastAction).
+    if (meta.agents && meta.agents.length) setAgents(meta.agents);
+    // Real round report (with price-breakdown infographic) replaces the mock.
+    if (meta.round_report) setRoundReport(meta.round_report);
+    // FR-9: at the end of 5 rounds, fetch + show the overall report once.
+    if (meta.finished && !overallFetchedRef.current) {
+      overallFetchedRef.current = true;
+      control
+        .overallReport()
+        .then((r) => {
+          if (r.report) setOverall(r.report);
+        })
+        .catch((err) => console.warn("[MarketAquarium] overall report:", err));
+    }
   }, []);
 
   const handleEvent = useCallback((text: string) => {
@@ -123,6 +153,7 @@ export default function Home() {
     // that same day (the backend only injects board/exchange visits while an
     // event is active). Market/posts updates flow back through handleTick as the
     // movement JSON streams in.
+    setComputing(true);
     control
       .marketEvent({ text, is_rumor: false })
       .then((res) => {
@@ -140,7 +171,8 @@ export default function Home() {
       .catch((err) => {
         console.warn("[MarketAquarium] marketEvent failed:", err);
         setActiveEvent({ text, impact: "neutral", source: "user" });
-      });
+      })
+      .finally(() => setComputing(false));
   }, []);
 
   const handleToggleReport = useCallback(() => {
@@ -155,18 +187,38 @@ export default function Home() {
     reverieControlsRef.current?.zoomOut();
   }, []);
 
+  /** A round's animation finished -> tell the player with the round summary. */
+  const handleRoundEnd = useCallback((_round: number) => {
+    setReportOpen(true);
+  }, []);
+
+  /** Click a character on the map -> open its detail (portfolio composition). */
+  const handleSelectAgent = useCallback(
+    (original: string) => {
+      const underscore = original.replace(/ /g, "_");
+      const a = agents.find(
+        (x) => x.sprite?.includes(underscore) || x.alias === original
+      );
+      if (a) setSelectedAgent(a);
+    },
+    [agents]
+  );
+
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} />;
   }
 
-  // Round report content: the matching mock round markdown (live overall report
-  // is not exposed by the control server in MVP).
+  // Round report: the real backend report (with price-breakdown infographic)
+  // when available, else the mock fallback.
   const mockReport =
     rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
-  const reportForView = {
-    round: currentRound,
-    markdown: mockReport.markdown,
-  };
+  const reportForView = roundReport
+    ? {
+        round: roundReport.round,
+        markdown: roundReport.markdown,
+        price_breakdowns: roundReport.price_breakdowns,
+      }
+    : { round: currentRound, markdown: mockReport.markdown };
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-surface-primary">
@@ -177,9 +229,11 @@ export default function Home() {
             simCode={canonicalSim}
             onTick={handleTick}
             controlsRef={reverieControlsRef}
+            onSelectAgent={handleSelectAgent}
+            onRoundEnd={handleRoundEnd}
           />
         ) : (
-          <div className="h-full w-full flex items-center justify-center text-text-tertiary text-sm">
+          <div className="h-full w-full flex items-center justify-center bg-white text-pixel-muted text-sm font-bold animate-pulse-soft">
             라이브 시뮬레이션을 준비하는 중...
           </div>
         )}
@@ -204,7 +258,7 @@ export default function Home() {
       {/* Market panel - floating left, content-fit */}
       {marketOpen && marketData && (
         <div className="absolute left-4 top-16 w-[300px] z-20 max-h-[calc(100vh-7rem)]">
-          <div className="bg-surface-card border border-border-light rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]">
+          <div className="bg-pixel-wall border-2 border-black rounded-2xl shadow-pixel-lg overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]">
             <MarketPanel data={marketData} />
           </div>
         </div>
@@ -213,7 +267,7 @@ export default function Home() {
       {/* Board feed - floating right */}
       {boardOpen && (
         <div className="absolute right-4 top-16 bottom-16 w-[370px] z-20">
-          <div className="h-full rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
+          <div className="h-full overflow-hidden">
             <BoardFeed posts={posts} events={events} />
           </div>
         </div>
@@ -222,6 +276,24 @@ export default function Home() {
       {/* Round report - center modal */}
       {reportOpen && (
         <RoundReport report={reportForView} onClose={() => setReportOpen(false)} />
+      )}
+
+      {/* Computing a round (LLM) — show progress so the wait is not a dead screen */}
+      {computing && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-pixel-ink/60">
+          <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg px-6 py-5 flex flex-col items-center gap-3 max-w-[320px]">
+            <Loader2 size={28} className="text-pixel-greenText animate-spin" />
+            <div className="text-sm font-bold text-black">에이전트들이 반응하는 중...</div>
+            <div className="text-[11px] text-pixel-muted text-center leading-relaxed">
+              이벤트를 인식하고 게시판·매매를 결정하고 있어요. 잠시만요.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* End-of-game (5 rounds) overall report + achievements */}
+      {overall && (
+        <OverallReport report={overall} onClose={() => setOverall(null)} />
       )}
 
       {selectedAgent && (

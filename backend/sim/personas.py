@@ -10,10 +10,23 @@ pools -- never LLM-generated (PRD: time/cost).
 
 from __future__ import annotations
 
+import json
 import random
+from pathlib import Path
 
 from .assets import assets_by_symbol, load_assets
 from .models import Action, Agent, AgentType, Location, Persona, PortfolioHolding, Position
+
+# Pre-computed allocations (cash% + per-asset%) baked in JSON — deterministic,
+# never user-selected (per product decision). See portfolio_allocations.json.
+_ALLOC_PATH = Path(__file__).resolve().parent / "portfolio_allocations.json"
+try:
+    _ALLOCATIONS: dict = {
+        k: v for k, v in json.loads(_ALLOC_PATH.read_text(encoding="utf-8")).items()
+        if not k.startswith("_")
+    }
+except Exception:
+    _ALLOCATIONS = {}
 
 # Default starting cash candidate pools (KRW), aligned with FE defaultCash.
 PERSONA_POOL: list[Persona] = [
@@ -174,24 +187,35 @@ def get_persona(persona_id: str) -> Persona:
     return _POOL_BY_ID[persona_id]
 
 
-def _sample_one_holding(
-    persona: Persona, prices: dict[str, float], cash: float, rng: random.Random
-) -> list[PortfolioHolding]:
-    """Pick one symbol from the persona's pool and a seeded position size."""
-    candidates = [s for s in persona.portfolio_symbol_pool if s in prices and prices[s] > 0]
-    if not candidates:
-        return []
-    symbol = rng.choice(candidates)
-    price = prices[symbol]
-    # invest a seeded fraction (20%-60%) of starting cash into the holding
-    invest = cash * rng.uniform(0.2, 0.6)
-    amount = round(invest / price, 6)
-    return [PortfolioHolding(asset=symbol, amount=amount, avgPrice=price)]
+def _precomputed_portfolio(
+    persona: Persona, prices: dict[str, float]
+) -> tuple[float, list[PortfolioHolding]]:
+    """Deterministically split the persona's set capital into cash + holdings
+    using the baked allocation (cash% + per-asset%). No randomness."""
+    spec = _ALLOCATIONS.get(persona.persona_id)
+    if not spec:
+        # Fallback: keep all as cash from the pool's middle value.
+        mid = persona.cash_pool[len(persona.cash_pool) // 2] if persona.cash_pool else 5_000_000
+        return float(mid), []
+    total = float(spec.get("total", 0))
+    cash = total * float(spec.get("cash_pct", 0)) / 100.0
+    holdings: list[PortfolioHolding] = []
+    for sym, pct in (spec.get("alloc") or {}).items():
+        price = prices.get(sym)
+        if not price or price <= 0:
+            cash += total * float(pct) / 100.0  # asset unavailable -> keep as cash
+            continue
+        invest = total * float(pct) / 100.0
+        amount = round(invest / price, 6)
+        if amount > 0:
+            holdings.append(PortfolioHolding(asset=sym, amount=amount, avgPrice=price))
+    return cash, holdings
 
 
 def build_agent(persona: Persona, prices: dict[str, float], rng: random.Random) -> Agent:
-    cash = rng.choice(persona.cash_pool)
-    portfolio = _sample_one_holding(persona, prices, cash, rng)
+    # rng kept in the signature for API compatibility; portfolio is now
+    # deterministic (pre-computed allocation), not sampled.
+    cash, portfolio = _precomputed_portfolio(persona, prices)
     return Agent(
         id=persona.persona_id,
         alias=persona.alias,

@@ -14,6 +14,7 @@
 import { MarketData } from "@/mock_data/market";
 import { Post } from "@/mock_data/posts";
 import { GameEvent } from "@/mock_data/events";
+import { Agent } from "@/mock_data/agents";
 
 // Live mode uses ONE merged backend (live_server) serving both /api/* and
 // /control/* on the same port (default :8000).
@@ -73,12 +74,44 @@ export interface MovementUnit {
 }
 
 /** Round-level metadata carried alongside each movement update. */
+export interface AgentPlan {
+  agent_id: string;
+  alias: string;
+  type: string;
+  plan: string;
+}
+
+export interface PriceBreakdownData {
+  symbol: string;
+  event_impact: number;
+  order_pressure: number;
+  emotion_overheat: number;
+  noise: number;
+  total_pct: number;
+  old_price?: number;
+  new_price?: number;
+}
+
+export interface RoundReportMeta {
+  round: number;
+  markdown: string;
+  fearGreedIndex?: number;
+  panicSellRatio?: number;
+  fomoBuyRatio?: number;
+  emotion_contribution_share?: number;
+  price_breakdowns?: PriceBreakdownData[];
+}
+
 export interface ReverieMeta {
   curr_time?: string;
   market?: MarketData;
   posts?: Post[];
   events?: GameEvent[];
   round?: number;
+  agents?: Agent[];
+  plans?: AgentPlan[];
+  round_report?: RoundReportMeta | null;
+  finished?: boolean;
 }
 
 export interface MovementUpdateResponse {

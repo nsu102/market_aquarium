@@ -32,7 +32,7 @@ function Badge({ count }: { count: number }) {
   if (count === 0) return null;
   const display = count > 99 ? "99+" : count;
   return (
-    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#C85A4A] text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none shadow-sm">
+    <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 bg-pixel-danger text-white text-[9px] font-bold border-2 border-black rounded-full flex items-center justify-center leading-none">
       {display}
     </span>
   );
@@ -66,72 +66,78 @@ export default function GameHUD({
     <>
       {/* ── Top-left: Logo ── */}
       <div className="absolute top-4 left-4 z-40">
-        <div className="flex items-center gap-2 bg-surface-card border border-border-light rounded-xl px-3 py-2 shadow-soft">
-          <Fish size={18} className="text-accent-blue" />
-          <span className="text-sm font-bold text-text-primary tracking-wide">MARKET AQUARIUM</span>
+        <div className="flex items-center gap-2 bg-white border-2 border-black rounded-xl px-3 py-2 shadow-pixel-sm">
+          <Fish size={18} className="text-pixel-greenText" />
+          <span className="text-sm font-bold text-black tracking-wide pixel-title">
+            MARKET AQUARIUM
+          </span>
         </div>
       </div>
 
       {/* ── Bottom-center: Toolbar ── */}
       <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40">
-        <div className="flex items-center gap-1 bg-surface-card border border-border-light rounded-2xl px-2 py-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.18)]">
-
-          {/* Market toggle */}
+        <div className="flex items-center gap-1 bg-white border-2 border-black rounded-2xl px-2 py-1.5 shadow-pixel-md">
           <ToolbarBtn
             onClick={onToggleMarket}
             active={marketOpen}
             icon={BarChart3}
             label="시장"
-            activeColor="accent-green"
+            activeBg="bg-pixel-grass"
             badge={!marketOpen ? marketNotifications : 0}
           />
-
-          {/* Board toggle */}
           <ToolbarBtn
             onClick={onToggleBoard}
             active={boardOpen}
             icon={MessageSquare}
             label="게시판"
-            activeColor="accent-blue"
+            activeBg="bg-pixel-water"
             badge={!boardOpen ? boardNotifications : 0}
           />
-
-          {/* Report */}
           <ToolbarBtn
             onClick={onToggleReport}
             active={reportOpen}
             icon={FileText}
             label="리포트"
-            activeColor="accent-gold"
+            activeBg="bg-pixel-path"
           />
 
-          <div className="w-px h-7 bg-border-light mx-1" />
+          <div className="w-px h-6 bg-slate-200 mx-1" />
 
           {/* Round display */}
           <div className="flex items-center gap-1 px-1">
-            <span className="text-[10px] text-text-tertiary font-medium">R</span>
-            <span className="text-accent-green font-mono font-bold text-sm min-w-[16px] text-center">{round}</span>
+            <span className="text-[10px] text-pixel-muted font-bold">R</span>
+            <span className="text-pixel-greenText font-bold text-sm min-w-[16px] text-center">
+              {round}
+            </span>
           </div>
 
-          <div className="w-px h-7 bg-border-light mx-1" />
+          <div className="w-px h-6 bg-slate-200 mx-1" />
 
           {/* Zoom */}
-          <button onClick={onZoomOut} className="w-8 h-8 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-secondary transition cursor-pointer flex items-center justify-center">
+          <button
+            onClick={onZoomOut}
+            aria-label="축소"
+            className="w-8 h-8 border-2 border-black rounded-lg bg-white text-black hover:bg-pixel-path cursor-pointer flex items-center justify-center active:translate-x-[1px] active:translate-y-[1px]"
+          >
             <ZoomOut size={15} />
           </button>
-          <button onClick={onZoomIn} className="w-8 h-8 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-secondary transition cursor-pointer flex items-center justify-center">
+          <button
+            onClick={onZoomIn}
+            aria-label="확대"
+            className="w-8 h-8 border-2 border-black rounded-lg bg-white text-black hover:bg-pixel-path cursor-pointer flex items-center justify-center active:translate-x-[1px] active:translate-y-[1px]"
+          >
             <ZoomIn size={15} />
           </button>
 
-          <div className="w-px h-7 bg-border-light mx-1" />
+          <div className="w-px h-6 bg-slate-200 mx-1" />
 
           {/* Event trigger */}
           <button
             onClick={() => setEventOpen(true)}
-            className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-accent-gold hover:bg-accent-gold/10 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 h-8 border-2 border-black rounded-lg bg-pixel-grass text-black font-bold hover:brightness-95 cursor-pointer active:translate-x-[1px] active:translate-y-[1px]"
           >
             <Zap size={14} />
-            <span className="text-[11px] font-semibold">이벤트</span>
+            <span className="text-[11px]">이벤트</span>
           </button>
         </div>
       </div>
@@ -139,14 +145,15 @@ export default function GameHUD({
       {/* ── Event input overlay ── */}
       {eventOpen && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 w-[520px] max-w-[90vw] animate-slide-up">
-          <div className="bg-surface-card border border-border-light rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] p-3">
+          <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg p-3">
             <div className="flex items-center gap-2 mb-2">
-              <Zap size={14} className="text-accent-gold" />
-              <span className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wider">Global Event</span>
+              <Zap size={14} className="text-pixel-greenText" />
+              <span className="text-[11px] text-black font-bold tracking-wider">GLOBAL EVENT</span>
               <div className="flex-1" />
               <button
                 onClick={() => setEventOpen(false)}
-                className="w-6 h-6 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-secondary transition cursor-pointer"
+                aria-label="닫기"
+                className="w-6 h-6 border-2 border-black rounded-lg bg-white flex items-center justify-center text-black hover:bg-pixel-danger hover:text-white cursor-pointer"
               >
                 <X size={14} />
               </button>
@@ -158,12 +165,12 @@ export default function GameHUD({
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 placeholder="트럼프가 중국 반도체 관세를 예고했다..."
                 autoFocus
-                className="flex-1 bg-surface-secondary border border-border-light rounded-xl px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent-gold/40 focus:ring-2 focus:ring-accent-gold/10 transition"
+                className="flex-1 bg-white border-2 border-black rounded-lg px-3 py-2 text-sm text-black placeholder:text-pixel-muted focus:outline-none focus:bg-pixel-path"
               />
               <button
                 onClick={submit}
                 disabled={!eventText.trim()}
-                className="px-4 py-2 bg-accent-gold/15 border border-accent-gold/30 text-accent-gold rounded-xl text-sm hover:bg-accent-gold/25 transition flex items-center gap-1.5 cursor-pointer font-semibold disabled:opacity-30 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-pixel-grass border-2 border-black rounded-lg text-black text-sm font-bold hover:brightness-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
               >
                 <Send size={13} />
                 <span>전송</span>
@@ -176,34 +183,28 @@ export default function GameHUD({
   );
 }
 
-const ACTIVE_STYLES: Record<string, string> = {
-  "accent-green": "bg-accent-green/12 text-accent-green border border-accent-green/25",
-  "accent-blue": "bg-accent-blue/12 text-accent-blue border border-accent-blue/25",
-  "accent-gold": "bg-accent-gold/12 text-accent-gold border border-accent-gold/25",
-};
-
 function ToolbarBtn({
   onClick,
   active,
   icon: Icon,
   label,
-  activeColor,
+  activeBg,
   badge = 0,
 }: {
   onClick: () => void;
   active: boolean;
   icon: React.ComponentType<any>;
   label: string;
-  activeColor: string;
+  activeBg: string;
   badge?: number;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`relative flex items-center gap-1.5 px-2.5 h-8 rounded-lg transition cursor-pointer text-[11px] font-medium ${
+      className={`relative flex items-center gap-1.5 px-2.5 h-8 border-2 rounded-lg cursor-pointer text-[11px] font-bold active:translate-x-[1px] active:translate-y-[1px] ${
         active
-          ? ACTIVE_STYLES[activeColor] || ""
-          : "text-text-tertiary hover:text-text-secondary hover:bg-surface-secondary border border-transparent"
+          ? `${activeBg} text-black border-black`
+          : "bg-white text-pixel-muted border-black hover:bg-pixel-path hover:text-black"
       }`}
     >
       <Icon size={14} />

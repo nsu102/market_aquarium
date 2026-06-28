@@ -17,7 +17,7 @@ import { GameEvent } from "@/mock_data/events";
 
 export const CONTROL_BASE =
   process.env.NEXT_PUBLIC_CONTROL_BASE?.replace(/\/$/, "") ||
-  "http://127.0.0.1:8001";
+  "http://127.0.0.1:8000";
 
 /* ── Response shapes ── */
 
@@ -160,4 +160,24 @@ export function marketEvent(
 /** Snapshot of the current market state (ready=false before the sim starts). */
 export function marketState(): Promise<MarketStateResponse> {
   return getJson<MarketStateResponse>("/control/market/state");
+}
+
+export interface OverallAchievement {
+  agent_id: string;
+  title: string;
+  description: string;
+}
+export interface OverallReportResponse {
+  ready: boolean;
+  finished?: boolean;
+  report?: {
+    markdown: string;
+    achievements: OverallAchievement[];
+    rounds: unknown[];
+  };
+}
+
+/** Overall end-of-game report + achievements (FR-9/FR-10), shown when 5 rounds finish. */
+export function overallReport(): Promise<OverallReportResponse> {
+  return getJson<OverallReportResponse>("/control/report/overall");
 }

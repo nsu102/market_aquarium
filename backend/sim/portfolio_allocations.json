@@ -1,0 +1,11 @@
+{
+  "_doc": "Pre-computed portfolio allocations. Per persona: total starting capital (KRW), cash_pct kept as cash, and alloc = {symbol: pct of total invested}. cash_pct + sum(alloc) must equal 100. Holdings are computed deterministically from total*pct/price at game start (no randomness, not user-selected).",
+  "panic":      {"total": 5000000,   "cash_pct": 40, "alloc": {"BTC": 35, "ETH": 25}},
+  "fomo":       {"total": 5000000,   "cash_pct": 20, "alloc": {"SOL": 40, "PEPE": 25, "DOGE": 15}},
+  "value":      {"total": 50000000,  "cash_pct": 30, "alloc": {"BTC": 40, "ETH": 30}},
+  "quant":      {"total": 20000000,  "cash_pct": 35, "alloc": {"BTC": 30, "ETH": 20, "SOL": 15}},
+  "whale":      {"total": 500000000, "cash_pct": 25, "alloc": {"BTC": 50, "ETH": 25}},
+  "contrarian": {"total": 15000000,  "cash_pct": 50, "alloc": {"BTC": 30, "ETH": 20}},
+  "news_bot":   {"total": 2000000,   "cash_pct": 80, "alloc": {"BTC": 20}},
+  "conspiracy": {"total": 4000000,   "cash_pct": 30, "alloc": {"DOGE": 30, "SHIB": 20, "PEPE": 20}}
+}

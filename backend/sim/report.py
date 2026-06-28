@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from .models import (
     Achievement,
+    Action,
     Agent,
     MarketData,
     OverallReport,
@@ -54,13 +55,14 @@ def emotion_contribution_share(breakdowns: list[PriceBreakdown]) -> float:
 # --------------------------------------------------------------------------- #
 # Net worth helper
 # --------------------------------------------------------------------------- #
-def _net_worth(agent: Agent) -> float:
-    """Best-effort net worth: cash + holdings valued at their average price.
-
-    No live price feed is available here, so holdings are valued at avgPrice.
-    This keeps the report self-contained and deterministic.
-    """
-    holdings = sum(h.amount * h.avgPrice for h in agent.portfolio)
+def _net_worth(agent: Agent, prices: dict[str, float] | None = None) -> float:
+    """Net worth: cash + holdings. Valued at CURRENT market price when a
+    ``prices`` map is provided (so price appreciation shows up as P&L), else at
+    avgPrice (self-contained fallback)."""
+    if prices:
+        holdings = sum(h.amount * prices.get(h.asset, h.avgPrice) for h in agent.portfolio)
+    else:
+        holdings = sum(h.amount * h.avgPrice for h in agent.portfolio)
     return agent.cash + holdings
 
 
@@ -80,7 +82,7 @@ def build_round_report(
 ) -> RoundReport:
     """Assemble a single round's report (indices + per-asset attribution)."""
     share = emotion_contribution_share(breakdowns)
-    markdown = _round_markdown(round, market, breakdowns, trades, share)
+    markdown = _round_markdown(round, market, breakdowns, trades, share, agents)
     return RoundReport(
         round=round,
         fearGreedIndex=market.fearGreedIndex,
@@ -92,12 +94,16 @@ def build_round_report(
     )
 
 
+_ACTION_KR = {"BUY": "매수", "SELL": "매도", "BUY_LARGE": "대량매수", "HOLD": "관망"}
+
+
 def _round_markdown(
     round: int,
     market: MarketData,
     breakdowns: list[PriceBreakdown],
     trades: list[TradeResult],
     share: float,
+    agents: list[Agent] | None = None,
 ) -> str:
     """Render the Korean markdown body for a round report (no emoji)."""
     lines: list[str] = []
@@ -141,11 +147,28 @@ def _round_markdown(
         lines.append("이번 라운드에는 가격 변동이 없었습니다.")
     lines.append("")
 
+    # --- Per-agent metrics -------------------------------------------------
+    if agents:
+        trade_by_agent = {t.agent_id: t for t in trades}
+        lines.append("## 에이전트 지표")
+        lines.append("")
+        lines.append("| 에이전트 | 행동 | 종목 | 공포 | 탐욕 |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for a in agents:
+            t = trade_by_agent.get(a.id)
+            action = _ACTION_KR.get(a.lastAction, a.lastAction or "-")
+            symbol = (t.symbol if t and t.symbol else "-")
+            lines.append(
+                f"| {a.alias} | {action} | {symbol} | {a.fear:.0f} | {a.greed:.0f} |"
+            )
+        lines.append("")
+
     # --- Trade summary -----------------------------------------------------
     lines.append("## 매매 요약")
     lines.append("")
     if trades:
-        lines.append(f"총 {len(trades)}건의 매매가 발생했습니다.")
+        traded = [t for t in trades if t.action != Action.HOLD]
+        lines.append(f"총 {len(traded)}건의 매매가 발생했습니다.")
     else:
         lines.append("이번 라운드에는 매매가 없었습니다.")
 
@@ -162,6 +185,7 @@ _LOW_HOLDINGS_EPS = 1e-9
 def award_achievements(
     agents: list[Agent],
     initial_state: dict[str, dict] | None = None,
+    prices: dict[str, float] | None = None,
 ) -> list[Achievement]:
     """Award end-of-game achievements (FR-9).
 
@@ -217,23 +241,26 @@ def award_achievements(
     if initial_state:
         best_agent: Agent | None = None
         best_growth = float("-inf")
+        best_start = 0.0
         for a in agents:
             start = initial_state.get(a.id)
             if not start:
                 continue
             start_worth = float(start.get("net_worth", start.get("cash", 0.0)))
-            growth = _net_worth(a) - start_worth
+            growth = _net_worth(a, prices) - start_worth
             if growth > best_growth:
                 best_growth = growth
                 best_agent = a
+                best_start = start_worth
         if best_agent is not None:
+            pct = (best_growth / best_start * 100.0) if best_start else 0.0
             achievements.append(
                 Achievement(
                     agent_id=best_agent.id,
                     title="최고 수익률",
                     description=(
                         f"{best_agent.alias} 님이 순자산을 "
-                        f"{best_growth:+,.0f} 만큼 늘리며 최고의 성과를 냈습니다."
+                        f"{best_growth:+,.0f}원 ({pct:+.1f}%) 늘리며 최고의 성과를 냈습니다."
                     ),
                 )
             )

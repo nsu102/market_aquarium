@@ -17,11 +17,13 @@ This module depends ONLY on sim.models and the stdlib.
 
 from __future__ import annotations
 
+from .llm import LLMClient, safe_json
 from .models import (
     Action,
     Agent,
     Asset,
     AgentType,
+    Event,
     MarketData,
     PortfolioHolding,
     TradeDecision,
@@ -219,6 +221,113 @@ def decide_trade(
 
     # news_bot (and any unknown type): never trades.
     return _hold(agent, "news_bot: observe only")
+
+
+# --------------------------------------------------------------------------- #
+# LLM-driven decision (FR-5, "행동 결정까지 LLM"). Falls back to the deterministic
+# rule above on ANY failure (no/invalid JSON, no key), so a trade always resolves
+# and the offline/mocked paths stay reproducible.
+# --------------------------------------------------------------------------- #
+_TRADE_SYSTEM = (
+    "You are ONE investor making a single trade decision at the exchange in a "
+    "market-psychology game. Stay true to your personality and emotional state. "
+    "Output strict JSON only."
+)
+
+
+def _portfolio_block(agent: Agent, assets_by_sym: dict[str, Asset]) -> str:
+    rows = []
+    for h in agent.portfolio:
+        a = assets_by_sym.get(h.asset)
+        if a is not None and h.amount > 0:
+            rows.append(f"{h.asset} {h.amount:g}주 (평단 {h.avgPrice:.0f}, 현재 {a.price:.0f})")
+    return "; ".join(rows) if rows else "(보유 종목 없음)"
+
+
+def decide_trade_llm(
+    client: LLMClient,
+    agent: Agent,
+    assets_by_sym: dict[str, Asset],
+    market: MarketData | None = None,
+    event: Event | None = None,
+) -> TradeDecision:
+    """LLM decides the action; deterministic ``decide_trade`` is the fallback."""
+    symbols = list(assets_by_sym.keys())[:12]
+    prices = ", ".join(f"{s} {assets_by_sym[s].price:.0f}" for s in symbols[:6])
+    fgi = f"{market.fearGreedIndex:.0f}/100" if market is not None else "n/a"
+    user = (
+        f"투자자: {agent.alias} (type: {agent.type})\n"
+        f"- 성향: {agent.innate}\n"
+        f"- 현재: {agent.currently}\n"
+        f"- 공포 {agent.fear:.0f}/100, 탐욕 {agent.greed:.0f}/100\n"
+        f"- 현금 {agent.cash:.0f}원, 보유: {_portfolio_block(agent, assets_by_sym)}\n"
+        f"시장: 공포탐욕지수 {fgi}, 시세 [{prices}]\n"
+        + (f'오늘 이벤트: "{event.text}"\n' if event is not None else "")
+        + f"거래 가능 종목: {symbols}\n\n"
+        "성격과 감정에 맞게 거래를 한 번 결정하라. JSON only:\n"
+        '{"action": "BUY|SELL|BUY_LARGE|HOLD", "symbol": "TICKER 또는 null", '
+        '"size": 0.0~1.0 (매수=현금 비율, 매도=보유수량 비율), "reason": "짧은 한국어 이유"}'
+    )
+    data = safe_json(client, user, fallback={}, system=_TRADE_SYSTEM, temperature=0.6)
+    if not data:  # empty/parse fail -> deterministic rule keeps the round alive
+        return decide_trade(agent, assets_by_sym, market)
+
+    try:
+        action = Action(str(data.get("action", "HOLD")).upper())
+    except ValueError:
+        action = Action.HOLD
+    reason = str(data.get("reason") or "LLM 판단")[:120]
+    if action == Action.HOLD:
+        return _hold(agent, reason)
+
+    symbol = data.get("symbol")
+    symbol = str(symbol).upper() if symbol not in (None, "", "null", "NULL") else None
+    try:
+        size = float(data.get("size", 0.3))
+    except (TypeError, ValueError):
+        size = 0.3
+    size = min(max(size, 0.0), 1.0)
+
+    if action in (Action.BUY, Action.BUY_LARGE):
+        if symbol not in assets_by_sym:
+            symbol = _buy_symbol(agent, assets_by_sym)
+        if symbol is None:
+            return _hold(agent, "살 종목이 없음")
+        qty = _buy_qty(agent, symbol, assets_by_sym, size or 0.3)
+        if qty <= 0:
+            return _hold(agent, "현금 부족")
+        return TradeDecision(agent_id=agent.id, action=action, symbol=symbol, qty=qty, reason=reason)
+
+    # SELL
+    held = agent.holding(symbol) if symbol else None
+    if held is None or held.amount <= 0:
+        held = _largest_holding(agent, assets_by_sym)
+    if held is None:
+        return _hold(agent, "팔 종목이 없음")
+    qty = held.amount * (size or 0.5)
+    if qty <= 0:
+        return _hold(agent, "매도 수량 0")
+    return TradeDecision(agent_id=agent.id, action=Action.SELL, symbol=held.asset, qty=qty, reason=reason)
+
+
+def run_trades_llm(
+    client: LLMClient,
+    agents: list[Agent],
+    assets_by_sym: dict[str, Asset],
+    market: MarketData | None = None,
+    event: Event | None = None,
+) -> list[TradeResult]:
+    """LLM-decide for all agents (concurrently — decisions are independent), then
+    execute in a deterministic order (by id)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _decide(a: Agent):
+        return a.id, decide_trade_llm(client, a, assets_by_sym, market, event)
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        decisions = dict(ex.map(_decide, agents))
+    ordered = sorted(agents, key=lambda a: a.id)
+    return [execute_trade(decisions[a.id], a, assets_by_sym) for a in ordered]
 
 
 def execute_trade(

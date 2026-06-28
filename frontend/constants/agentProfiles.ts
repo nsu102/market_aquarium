@@ -19,7 +19,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
     type: "panic_seller",
     sprite: "/assets/characters/Jane_Moreno.png",
     profile: "/assets/characters/profile/Jane_Moreno.png",
-    color: "#C85A4A",
+    color: "#6E4B12",
     defaultCash: 5000000,
     defaultFear: 85,
     defaultGreed: 15,
@@ -32,7 +32,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
     type: "fomo_trader",
     sprite: "/assets/characters/Eddy_Lin.png",
     profile: "/assets/characters/profile/Eddy_Lin.png",
-    color: "#D4A843",
+    color: "#FFD23F",
     defaultCash: 5000000,
     defaultFear: 20,
     defaultGreed: 90,
@@ -45,7 +45,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
     type: "value_investor",
     sprite: "/assets/characters/Klaus_Mueller.png",
     profile: "/assets/characters/profile/Klaus_Mueller.png",
-    color: "#5B8FB9",
+    color: "#327A1C",
     defaultCash: 50000000,
     defaultFear: 30,
     defaultGreed: 40,
@@ -58,7 +58,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
     type: "quant",
     sprite: "/assets/characters/Rajiv_Patel.png",
     profile: "/assets/characters/profile/Rajiv_Patel.png",
-    color: "#8B6DB0",
+    color: "#A8741A",
     defaultCash: 20000000,
     defaultFear: 45,
     defaultGreed: 55,
@@ -71,7 +71,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
     type: "whale",
     sprite: "/assets/characters/Arthur_Burton.png",
     profile: "/assets/characters/profile/Arthur_Burton.png",
-    color: "#5B8C3E",
+    color: "#1E4D11",
     defaultCash: 500000000,
     defaultFear: 10,
     defaultGreed: 70,
@@ -84,7 +84,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
     type: "contrarian",
     sprite: "/assets/characters/Wolfgang_Schulz.png",
     profile: "/assets/characters/profile/Wolfgang_Schulz.png",
-    color: "#5BA88C",
+    color: "#4FA82A",
     defaultCash: 15000000,
     defaultFear: 25,
     defaultGreed: 60,
@@ -123,9 +123,9 @@ export const CHARACTER_POOL = [
 ];
 
 export const CUSTOM_COLORS = [
-  "#C85A4A", "#D4A843", "#5B8FB9", "#8B6DB0", "#5B8C3E", "#5BA88C",
-  "#D48A3C", "#7B6BA0", "#4A8B7B", "#B85A6A", "#6B8B4A", "#8B7B3E",
-  "#5A7BC8", "#C87A5A", "#6BAA6B", "#AA6B8B", "#8BAA5B", "#5B6BAA",
+  "#6E4B12", "#FFD23F", "#327A1C", "#A8741A", "#1E4D11", "#4FA82A",
+  "#E0A41E", "#A8741A", "#327A1C", "#6E4B12", "#4FA82A", "#A8741A",
+  "#327A1C", "#6E4B12", "#78F142", "#6E4B12", "#B7EE8C", "#327A1C",
 ];
 
 export const DEFAULT_ASSETS = [

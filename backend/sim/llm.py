@@ -9,8 +9,11 @@ Design goals:
 - Secure: the API key comes from the OPENROUTER_API_KEY env var, never
   hardcoded. (The legacy hardcoded key in the reverie fork must be rotated.)
 
-Chat routes through OpenRouter (model from OPENROUTER_MODEL, default a Claude
-model per the locked decision). Embeddings are intentionally out of scope here.
+Chat uses the OpenAI SDK with the key the user put in the project's .env. That
+key (stored under OPENROUTER_API_KEY, but it is actually a plain OpenAI key) is
+loaded with override=True so the project's .env WINS over any ambient OS
+OPENAI_API_KEY. We call the OpenAI API directly (default base) with a native
+model id. Embeddings are intentionally out of scope here.
 """
 
 from __future__ import annotations
@@ -18,10 +21,40 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Callable
 
-DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-haiku")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Load the project's .env with override so the key the user put there beats any
+# ambient OS environment variable. Tests set MARKET_DISABLE_LLM=1 (conftest) to
+# skip this and stay hermetic/offline.
+if not os.getenv("MARKET_DISABLE_LLM"):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+    except Exception:
+        pass
+
+
+def _native_model(raw: str) -> str:
+    """OpenAI direct API wants a bare model id (strip any 'openai/' prefix)."""
+    return raw.split("/", 1)[1] if raw.startswith("openai/") else raw
+
+
+# The key may be an OpenRouter key (sk-or-...) or a plain OpenAI key (sk-...).
+# Auto-route by prefix so whichever the user provides just works:
+#   sk-or*  -> OpenRouter base + namespaced model id (e.g. "openai/gpt-4o-mini")
+#   else    -> OpenAI direct base + native model id (e.g. "gpt-4o-mini")
+_KEY = os.getenv("OPENROUTER_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+_IS_OPENROUTER = _KEY.startswith("sk-or")
+
+if _IS_OPENROUTER:
+    DEFAULT_BASE_URL = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
+    DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini") or "openai/gpt-4o-mini"
+else:
+    DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL") or None
+    DEFAULT_MODEL = _native_model(
+        os.getenv("OPENAI_MODEL") or os.getenv("OPENROUTER_MODEL") or "gpt-4o-mini"
+    )
 
 
 class LLMError(RuntimeError):
@@ -29,17 +62,21 @@ class LLMError(RuntimeError):
 
 
 class LLMClient:
-    """Thin OpenRouter chat client. Lazy-imports httpx so tests need no network."""
+    """Thin chat client: OpenAI SDK -> OpenRouter base_url, OpenRouter key from
+    .env. Lazy-imports openai so tests need no network and no key."""
 
     def __init__(
         self,
         api_key: str | None = None,
         model: str | None = None,
         timeout: float = 30.0,
+        base_url: str | None = None,
     ):
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
         self.model = model or DEFAULT_MODEL
+        self.base_url = base_url or DEFAULT_BASE_URL
         self.timeout = timeout
+        self._client = None
 
     @property
     def available(self) -> bool:
@@ -48,21 +85,20 @@ class LLMClient:
     def chat(self, user: str, system: str | None = None, temperature: float = 0.7) -> str:
         if not self.available:
             raise LLMError("OPENROUTER_API_KEY not set")
-        import httpx  # lazy import
-
-        messages: list[dict[str, str]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": user})
         try:
-            resp = httpx.post(
-                OPENROUTER_URL,
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.model, "messages": messages, "temperature": temperature},
-                timeout=self.timeout,
+            if self._client is None:
+                from openai import OpenAI  # lazy import
+                self._client = OpenAI(
+                    api_key=self.api_key, base_url=self.base_url, timeout=self.timeout
+                )
+            messages: list[dict[str, str]] = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": user})
+            resp = self._client.chat.completions.create(
+                model=self.model, messages=messages, temperature=temperature
             )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return resp.choices[0].message.content
         except Exception as exc:  # noqa: BLE001 - any failure -> LLMError -> fallback
             raise LLMError(str(exc)) from exc
 

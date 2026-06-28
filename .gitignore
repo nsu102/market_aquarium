@@ -10,7 +10,9 @@ bin/
 include/
 pip-selfcheck.json
 .DS_Store
-
+CHECKLIST.md
+DESIGN.md
+PLANS.md
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -112,3 +114,9 @@ node_modules
 
 # build artifacts
 *.tsbuildinfo
+.gstack/
+
+# runtime-generated live sims (not committed)
+environment/frontend_server/storage/market_*/
+frontend/public/assets
+frontend/public/img

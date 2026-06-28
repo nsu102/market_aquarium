@@ -147,21 +147,49 @@ def _as_str_list(value: object) -> list[str]:
 
 
 def decide_write(
-    client: LLMClient, agent: Agent, event: Event, threads: list[Post]
+    client: LLMClient,
+    agent: Agent,
+    event: Event,
+    threads: list[Post],
+    interests: list[str] | None = None,
+    sectors: list[str] | None = None,
 ) -> SnsWrite:
     """One LLM call -> the single utterance (or SKIP). Never raises."""
+    interests = interests or []
+    sectors = sectors or []
+    interest_line = ""
+    if interests or sectors:
+        parts = []
+        if interests:
+            parts.append("관심 종목: " + ", ".join(interests))
+        if sectors:
+            parts.append("관심 섹터: " + ", ".join(sectors))
+        interest_line = "\n" + " / ".join(parts) + "\n"
+    # The event headline is a NOTICE (shown as context), not a thread to reply to.
+    # Agents discuss with EACH OTHER -> only investor posts are repliable threads.
+    discussion = [t for t in threads if t.agentId != "system"]
     user = (
-        f"{_persona_block(agent)}\n\n"
-        f"{_feed_block(event, threads)}\n\n"
-        "You just read this feed. Decide your single reaction, true to your "
-        "personality. You may post something new, comment on a thread, reply "
-        "into a thread's discussion, or stay silent.\n"
+        f"{_persona_block(agent)}{interest_line}\n\n"
+        f"{_feed_block(event, discussion)}\n\n"
+        "This is a focus-group-style discussion among investors reacting to the "
+        "event. React with ONE utterance, true to your personality. ENGAGE with a "
+        "SPECIFIC other investor above when there is one — name your stance toward "
+        "their point (agree / push back / add nuance) via COMMENT or REPLY. Start "
+        "a new POST only to open a genuinely different angle no one raised. SKIP rarely.\n"
+        "Bring a perspective the others have NOT voiced; do NOT repeat anything "
+        "already on the board (yours or others'). React to THIS event in fresh wording.\n"
+        "Do NOT repeat anything you (or others) already said on the board -- react "
+        "specifically to THIS event and the latest messages, in fresh wording.\n"
+        "Be concrete about the assets/sectors you care about (listed above), "
+        "mention specific tickers, and set symbol_tags to those tickers.\n"
+        "For COMMENT/REPLY, set target_thread_id to the thread you are replying to.\n"
         "Respond with JSON only: "
         '{"kind": "POST|COMMENT|REPLY|SKIP", "text": "your short Korean message", '
         '"target_thread_id": "id of the thread for COMMENT/REPLY or null", '
         '"symbol_tags": ["TICKER", ...]}'
     )
-    data = safe_json(client, user, fallback=_FALLBACK, system=_SYSTEM)
+    # Higher temperature so repeated rounds don't echo the same wording.
+    data = safe_json(client, user, fallback=_FALLBACK, system=_SYSTEM, temperature=0.95)
 
     # --- validate kind --------------------------------------------------- #
     raw_kind = str(data.get("kind", "SKIP")).upper()
@@ -172,7 +200,7 @@ def decide_write(
 
     text = data.get("text")
     text = str(text) if text not in (None, "") else None
-    symbol_tags = _as_str_list(data.get("symbol_tags"))
+    symbol_tags = _as_str_list(data.get("symbol_tags")) or list(interests[:2])
     target_id = data.get("target_thread_id")
     target_id = str(target_id) if target_id not in (None, "") else None
 
@@ -180,14 +208,14 @@ def decide_write(
     if kind is not WriteKind.SKIP and text is None:
         kind = WriteKind.SKIP
 
-    # --- resolve target for COMMENT/REPLY -------------------------------- #
+    # --- resolve target for COMMENT/REPLY (investor threads only) -------- #
     if kind in (WriteKind.COMMENT, WriteKind.REPLY):
-        target = _thread_by_id(threads, target_id)
+        target = _thread_by_id(discussion, target_id)
         if target is None:
-            # LLM gave no/invalid target: auto-pick the most relevant thread.
-            target_id = _auto_target(threads)
+            # LLM gave no/invalid target: auto-pick the most relevant investor thread.
+            target_id = _auto_target(discussion)
             if target_id is None:
-                # Nothing to comment on -> turn it into a fresh post instead.
+                # No investor thread yet -> open the discussion with a fresh post.
                 kind = WriteKind.POST
     elif kind is WriteKind.POST:
         target_id = None
@@ -216,6 +244,8 @@ def view_sns(
     threads: list[Post],
     round: int,
     timestamp: str = "",
+    interests: list[str] | None = None,
+    sectors: list[str] | None = None,
 ) -> SnsResult:
     """Read the whole feed (contagion input) and produce one utterance.
 
@@ -223,7 +253,7 @@ def view_sns(
     built deterministically so the read half stays stable and cost-free.
     """
     injected = read_feed(event, threads, created=timestamp)
-    write = decide_write(client, agent, event, threads)
+    write = decide_write(client, agent, event, threads, interests=interests, sectors=sectors)
     return SnsResult(injected_thoughts=injected, write=write)
 
 

@@ -40,7 +40,8 @@ import {
 const TILE_WIDTH = 32;
 const CURR_MAZE = "the_ville";
 // px/frame. TILE_WIDTH must divide evenly so personas land exactly on tiles.
-const MOVEMENT_SPEED = 8;
+// 16 -> 2 frames/tile (2x faster day animation; 8 felt too slow).
+const MOVEMENT_SPEED = 16;
 const HOME_POLL_MS = 1200;
 // While no run is active the /update poll returns not-ready (<step> === -1).
 // Back off between such polls so we don't hammer the server every frame.
@@ -56,14 +57,22 @@ interface Props {
   onTick: (meta: ReverieMeta) => void;
   /** Optional ref the scene populates with zoom controls for the HUD. */
   controlsRef?: MutableRefObject<GameControls | null>;
+  /** Called with a persona's original name when its sprite is clicked. */
+  onSelectAgent?: (original: string) => void;
+  /** Called once when a round's animation finishes (timeline drained). */
+  onRoundEnd?: (round: number) => void;
 }
 
 type LoadPhase = "loading" | "ready" | "down" | "error";
 
-export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
+export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgent, onRoundEnd }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onTickRef = useRef(onTick);
   onTickRef.current = onTick;
+  const onSelectRef = useRef(onSelectAgent);
+  onSelectRef.current = onSelectAgent;
+  const onRoundEndRef = useRef(onRoundEnd);
+  onRoundEndRef.current = onRoundEnd;
 
   const personasRef = useRef<GamePersona[]>([]);
   const initialStepRef = useRef(0);
@@ -135,6 +144,9 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
     // Timestamp gate: when a /update poll comes back not-ready (no run active),
     // wait UPDATE_BACKOFF_MS before re-polling instead of spamming every frame.
     let nextUpdatePollAt = 0;
+    // Round-end detection: fire onRoundEnd once when a round's timeline drains.
+    let lastMetaRound: number | null = null;
+    let firedRoundEnd: number | null = null;
 
     const personaSprites: Record<string, Phaser.GameObjects.Sprite> = {};
     const labels: Record<string, Phaser.GameObjects.Text> = {};
@@ -270,13 +282,16 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
           .sprite(startPos[0], startPos[1], name, "down")
           .setSize(30, 40)
           .setOffset(0, 32);
+        // Click a character to open its detail (portfolio composition, etc.).
+        sprite.setInteractive({ useHandCursor: true });
+        sprite.on("pointerdown", () => onSelectRef.current?.(p.original));
         personaSprites[name] = sprite;
 
         // Small text label with initials (NO emoji bubble).
         labels[name] = this.add
           .text(sprite.body.x - 6, sprite.body.y - 74, p.initial || initialsOf(p.original), {
             font: "16px monospace",
-            color: "#1a1612",
+            color: "#1E1A17",
             padding: { x: 6, y: 4 },
             backgroundColor: "#ffffff",
           })
@@ -415,6 +430,15 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
               // Not ready (e.g. <step> === -1): no run active yet. Stay idle and
               // re-poll quietly after a short backoff. No throw, no console spam.
               nextUpdatePollAt = Date.now() + UPDATE_BACKOFF_MS;
+              // The round's timeline just drained -> the day ended. Fire once.
+              if (
+                hasMovementRef.current &&
+                lastMetaRound != null &&
+                firedRoundEnd !== lastMetaRound
+              ) {
+                firedRoundEnd = lastMetaRound;
+                onRoundEndRef.current?.(lastMetaRound);
+              }
             }
           })
           .catch(() => {
@@ -445,7 +469,10 @@ export default function ReverieGame({ simCode, onTick, controlsRef }: Props) {
         // Emit the round meta once per step (market / posts / round).
         if (executeCount === executeCountMax) {
           const meta = executeMovement?.meta;
-          if (meta) onTickRef.current?.(meta);
+          if (meta) {
+            onTickRef.current?.(meta);
+            if (typeof meta.round === "number") lastMetaRound = meta.round;
+          }
         }
 
         if (executeCount <= 0) {
