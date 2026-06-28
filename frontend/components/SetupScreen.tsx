@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Agent } from "@/mock_data/agents";
 import { Asset } from "@/mock_data/market";
 import { AGENT_PROFILES, DEFAULT_ASSETS, CHARACTER_POOL, CUSTOM_COLORS } from "@/constants/agentProfiles";
+import { seedPriceHistory } from "@/utils/sparkline";
 import {
   Play,
   Plus,
@@ -166,7 +167,8 @@ export default function SetupScreen({ onStart }: Props) {
       position: { x: 20 + Math.random() * 60, y: 20 + Math.random() * 60 }, bubble: "", color: a.color,
     }));
     const finalAssets: Asset[] = DEFAULT_ASSETS.map((a) => ({
-      symbol: a.symbol, name: a.name, price: a.price, change24h: 0, volume: 0, priceHistory: [a.price],
+      symbol: a.symbol, name: a.name, price: a.price, change24h: 0, volume: 0,
+      priceHistory: seedPriceHistory(a.symbol, a.price),
     }));
     onStart(finalAgents, finalAssets);
   };
