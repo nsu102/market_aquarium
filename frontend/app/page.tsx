@@ -12,6 +12,7 @@ import AgentDetail from "@/components/AgentDetail";
 import EventOverlay from "@/components/EventOverlay";
 import SetupScreen from "@/components/SetupScreen";
 import GameHUD from "@/components/GameHUD";
+import StrategyModal from "@/components/StrategyModal";
 import ActivityLog, { type LogEntry } from "@/components/ActivityLog";
 import { Agent } from "@/mock_data/agents";
 import { Asset, MarketData } from "@/mock_data/market";
@@ -25,6 +26,7 @@ import type { ReverieMeta, RoundReportMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
 import type { TradeAction } from "@/constants/trade";
 import { formatClock, ROUND_MINUTES, ROUND_REAL_MS } from "@/lib/timeline";
+import type { AgentOverride } from "@/lib/control";
 
 // Canonical Phaser viewer is client-only (loads Phaser + the_ville assets).
 const ReverieGame = dynamic(() => import("@/components/ReverieGame"), {
@@ -94,6 +96,9 @@ export default function Home() {
   } | null>(null);
   const overallFetchedRef = useRef(false);
   const [gameFinished, setGameFinished] = useState(false);
+  const [userAgentId, setUserAgentId] = useState<string | null>("player");
+  const [pendingOverride, setPendingOverride] = useState<AgentOverride | null>(null);
+  const [strategyModalOpen, setStrategyModalOpen] = useState(false);
   const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
   const prevPostCountRef = useRef(0);
@@ -175,7 +180,8 @@ export default function Home() {
   }, []);
 
   const handleStart = useCallback(
-    (setupAgents: Agent[], setupAssets: Asset[], presetIndices?: Record<string, number>) => {
+    (setupAgents: Agent[], setupAssets: Asset[], presetIndices?: Record<string, number>, selectedUserAgentId?: string) => {
+      setUserAgentId(selectedUserAgentId ?? "player");
       seedFromSetup(setupAgents, setupAssets);
       setCanonicalSim(null);
       setGameStarted(true);
@@ -202,7 +208,7 @@ export default function Home() {
           // Game loaded — user clicks "이벤트" button to start a round
         })
         .catch((err) => {
-          console.warn("[MarketAquarium] canonical start failed:", err);
+          console.warn("[MarketVillage] canonical start failed:", err);
         });
     },
     [seedFromSetup]
@@ -221,7 +227,7 @@ export default function Home() {
       .resume(savedUid, sim)
       .then((res) => {
         if (res.status === "error") {
-          console.warn("[MarketAquarium] resume failed:", res.error);
+          console.warn("[MarketVillage] resume failed:", res.error);
           control.clearSessionUid();
           setGameStarted(false);
           return;
@@ -240,7 +246,7 @@ export default function Home() {
         }).catch(() => { });
       })
       .catch((err) => {
-        console.warn("[MarketAquarium] resume failed:", err);
+        console.warn("[MarketVillage] resume failed:", err);
         control.clearSessionUid();
         setGameStarted(false);
       });
@@ -286,7 +292,7 @@ export default function Home() {
         .then((r) => {
           if (r.report) setOverall(r.report);
         })
-        .catch((err) => console.warn("[MarketAquarium] overall report:", err));
+        .catch((err) => console.warn("[MarketVillage] overall report:", err));
     }
   }, [sessionUid, pushLog]);
 
@@ -295,8 +301,10 @@ export default function Home() {
     setNeedEvent(false);
     setComputing(true);
     pushLog(`이벤트 발생: ${text}`);
+    const override = pendingOverride ?? undefined;
+    setPendingOverride(null);
     control
-      .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
+      .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false, agent_override: override })
       .then((res) => {
         setActiveEvent({
           text,
@@ -313,15 +321,15 @@ export default function Home() {
         startTimer();
         reverieControlsRef.current?.focusAgent();
         control.run(STEPS_PER_DAY, sessionUid ?? undefined).catch((err) => {
-          console.warn("[MarketAquarium] run after event:", err);
+          console.warn("[MarketVillage] run after event:", err);
         });
       })
       .catch((err) => {
-        console.warn("[MarketAquarium] marketEvent failed:", err);
+        console.warn("[MarketVillage] marketEvent failed:", err);
         setActiveEvent({ text, impact: "neutral", source: "user" });
       })
       .finally(() => setComputing(false));
-  }, [sessionUid, startTimer, gameFinished, pushLog]);
+  }, [sessionUid, startTimer, gameFinished, pushLog, pendingOverride]);
 
   // D4: like/dislike a post or comment.
   const handleVote = useCallback(
@@ -331,7 +339,7 @@ export default function Home() {
         .then((res) => {
           if (res.posts) syncPosts(res.posts);
         })
-        .catch((err) => console.warn("[MarketAquarium] vote:", err));
+        .catch((err) => console.warn("[MarketVillage] vote:", err));
     },
     [sessionUid]
   );
@@ -347,7 +355,7 @@ export default function Home() {
           if (res.sns_agents) setSnsAgents(res.sns_agents);
           if (res.emotion_deltas) setEmotionDeltas(res.emotion_deltas);
         })
-        .catch((err) => console.warn("[MarketAquarium] board post:", err));
+        .catch((err) => console.warn("[MarketVillage] board post:", err));
     },
     [sessionUid]
   );
@@ -384,7 +392,10 @@ export default function Home() {
     setPlaying(false);
     setReportOpen(true);
     pushLog(`라운드 ${_round} 종료`);
-    if (!gameFinished) setNeedEvent(true);
+    if (!gameFinished) {
+      setNeedEvent(true);
+      // Strategy modal opens after user closes the report
+    }
   }, [stopTimer, gameFinished, pushLog]);
 
   /** Click a character on the map -> open its detail (portfolio composition). */
@@ -485,12 +496,13 @@ export default function Home() {
             onKeyboardEnabled={handleKeyboardEnabled}
             onResume={handleGameResume}
             onStop={handleGamePause}
-            forceEventOpen={needEvent && !gameFinished && !reportOpen}
-            onOpenEvent={() => !gameFinished && setNeedEvent(true)}
+            forceEventOpen={needEvent && !strategyModalOpen && !gameFinished && !reportOpen}
+            onOpenEvent={() => { if (!gameFinished) { setNeedEvent(true); setStrategyModalOpen(true); } }}
             gameFinished={gameFinished}
           />
 
           <ActivityLog entries={activityLog} />
+
         </main>
 
         {/* Right column: board feed */}
@@ -515,7 +527,10 @@ export default function Home() {
 
       {/* Round report - center modal */}
       {reportOpen && (
-        <RoundReport report={reportForView} onClose={() => setReportOpen(false)} />
+        <RoundReport report={reportForView} onClose={() => {
+          setReportOpen(false);
+          if (needEvent && !gameFinished) setStrategyModalOpen(true);
+        }} />
       )}
 
       {/* Computing a round (LLM) — show progress so the wait is not a dead screen */}
@@ -545,6 +560,28 @@ export default function Home() {
       {selectedAsset && (
         <AssetModal asset={selectedAsset} onClose={() => setSelectedAsset(null)} />
       )}
+
+      {/* Strategy modal — shown after report closes, before event input */}
+      {strategyModalOpen && userAgentId && (() => {
+        const a = agents.find((x) => x.id === userAgentId);
+        if (!a) return null;
+        return (
+          <StrategyModal
+            round={currentRound}
+            userAgent={{
+              id: a.id, alias: a.alias,
+              fear: a.fear, greed: a.greed,
+              confidence: a.confidence ?? 50, excitement: a.excitement ?? 50, trust: a.trust ?? 50,
+              portfolio: a.portfolio, cash: a.cash, sprite: a.sprite,
+            }}
+            onConfirm={(override) => {
+              setPendingOverride(override);
+              setStrategyModalOpen(false);
+            }}
+            onKeyboardEnabled={handleKeyboardEnabled}
+          />
+        );
+      })()}
 
       {activeEvent && (
         <EventOverlay

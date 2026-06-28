@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-listup.py  —  Market Aquarium "종목 분류 및 리스트업 + 업비트 api" 산출물 (담당: 희경)
+listup.py  —  Market Village "종목 분류 및 리스트업 + 업비트 api" 산출물 (담당: 희경)
 
 역할:
   빌드타임에 고정된 universe.json(8섹터/cap-weighted 유니버스)을 읽어,

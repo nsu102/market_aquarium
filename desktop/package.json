@@ -1,7 +1,7 @@
 {
-  "name": "market-aquarium-desktop",
+  "name": "market-village-desktop",
   "version": "1.0.0",
-  "description": "Market Aquarium - Desktop",
+  "description": "Market Village - Desktop",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -11,8 +11,8 @@
     "build:linux": "electron-builder --linux"
   },
   "build": {
-    "appId": "com.marketaquarium.desktop",
-    "productName": "Market Aquarium",
+    "appId": "com.marketvillage.desktop",
+    "productName": "Market Village",
     "icon": "icon.ico",
     "mac": {
       "icon": "icon.icns",

@@ -5,7 +5,7 @@
  *
  * Ports the reverie simulate loop (process -> update -> execute) from
  * generative_agents/nextfront/components/SimGame.tsx, adapted to the
- * market_aquarium product:
+ * market_village product:
  *   - loads the_ville tilemap + per-persona character atlases from API_BASE
  *   - drives each step by sending the current tile positions (process),
  *     polling the movement JSON (update), then interpolating each persona to
@@ -59,6 +59,8 @@ export interface GameControls {
   zoomOut: () => void;
   /** Disable/enable keyboard camera controls (e.g. while typing in an input). */
   setKeyboardEnabled: (on: boolean) => void;
+  /** Pan camera smoothly to a random NPC (or a specific one by underscore name). */
+  focusAgent: (underscore?: string) => void;
 }
 
 interface Props {
@@ -412,6 +414,25 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
             camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.3, 1.0)),
           setKeyboardEnabled: (on: boolean) => {
             if (this.input.keyboard) this.input.keyboard.enabled = on;
+          },
+          focusAgent: (underscore?: string) => {
+            const names = Object.keys(personaSprites);
+            if (!names.length) return;
+            const pick = underscore && personaSprites[underscore]
+              ? underscore
+              : names[Math.floor(Math.random() * names.length)];
+            const sprite = personaSprites[pick];
+            if (!sprite) return;
+            const body = sprite.body as Phaser.Physics.Arcade.Body;
+            // ponytail: smooth pan via tween on the invisible camera anchor
+            const pb = player.body as Phaser.Physics.Arcade.Body;
+            scene.tweens.add({
+              targets: pb,
+              x: body.x,
+              y: body.y,
+              duration: 600,
+              ease: "Sine.easeInOut",
+            });
           },
         };
       }

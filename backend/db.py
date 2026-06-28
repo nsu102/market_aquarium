@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pymongo import MongoClient
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27018")
-DB_NAME = os.environ.get("MONGO_DB", "market_aquarium")
+DB_NAME = os.environ.get("MONGO_DB", "market_village")
 
 _client: MongoClient | None = None
 

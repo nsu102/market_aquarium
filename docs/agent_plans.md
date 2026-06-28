@@ -45,7 +45,7 @@
 
 ## Generative Agents 구조 매핑
 
-| 원본 기능 | 기존 의미 | Market Aquarium 의미 | 처리 방식 |
+| 원본 기능 | 기존 의미 | Market Village 의미 | 처리 방식 |
 |---|---|---|---|
 | Daily Planning | NPC 하루 일과 계획 | 장 시작 전 투자 계획 수립 | 템플릿 |
 | Poignancy Scoring | 사건 중요도 평가 | 뉴스/루머의 심리적 충격 평가 | LLM |
@@ -116,7 +116,7 @@ for each agent:
 모든 에이전트가 공유하는 기본 프레임:
 
 ```
-당신은 가상 투자 시장 "Market Aquarium"의 참여자입니다.
+당신은 가상 투자 시장 "Market Village"의 참여자입니다.
 당신의 이름은 {alias}이고, {description}
 
 ## 성격
@@ -352,7 +352,7 @@ action 가이드:
 라운드 종료 후 1회 호출:
 
 ```
-당신은 Market Aquarium의 시장 분석 리포터입니다.
+당신은 Market Village의 시장 분석 리포터입니다.
 이번 라운드의 시뮬레이션 결과를 마크다운 형식으로 리포트를 작성하세요.
 
 ## 이번 라운드 데이터

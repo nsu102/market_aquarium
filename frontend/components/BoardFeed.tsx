@@ -244,7 +244,7 @@ function FeedTab({
         {/* News card */}
         {latestEvent && (
           <div className="pt-3">
-            <div className="border-2 border-black rounded-2xl bg-white overflow-hidden shadow-pixel-sm">
+            <div className="border-2 border-black rounded-xl bg-white overflow-hidden shadow-pixel-sm">
               <div className="flex items-center gap-2 px-3 py-1.5 border-b-2 border-black bg-white">
                 <Newspaper size={14} className="text-black" strokeWidth={2.2} />
                 <span className="text-[10px] font-extrabold text-black tracking-wide">NEWS</span>
@@ -313,7 +313,7 @@ function PostCard({
   return (
     <div className="pt-3 last:pb-3">
       <div
-        className={`bg-white border-2 rounded-2xl p-3 shadow-pixel-sm ${
+        className={`bg-white border-2 rounded-xl p-3 shadow-pixel-sm ${
           isUser ? "border-pixel-greenText" : "border-black"
         }`}
       >
@@ -427,7 +427,7 @@ function PostCard({
                         <CIcon size={11} />
                       )}
                     </div>
-                    <div className="flex-1 min-w-0 bg-pixel-wall rounded-2xl rounded-tl-md px-2.5 py-1.5">
+                    <div className="flex-1 min-w-0 bg-pixel-wall rounded-xl rounded-tl-md px-2.5 py-1.5">
                       <div className="flex items-center gap-1 mb-0.5">
                         <span className="text-[11px] font-bold text-black leading-tight">{c.agentAlias}</span>
                         {c.is_user && (

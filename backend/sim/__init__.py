@@ -1,1 +1,1 @@
-"""Market Aquarium simulation domain package."""
+"""Market Village simulation domain package."""

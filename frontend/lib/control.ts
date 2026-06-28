@@ -6,7 +6,7 @@
  * without touching the backend terminal.
  *
  * Base URL comes from NEXT_PUBLIC_CONTROL_BASE (default http://127.0.0.1:8001).
- * The market_aquarium MarketData / Post / Agent / GameEvent shapes are reused
+ * The market_village MarketData / Post / Agent / GameEvent shapes are reused
  * directly because the control server's JSON is aligned with them.
  */
 
@@ -90,10 +90,22 @@ export interface MarketStateResponse {
   sectors: string[];
 }
 
+export interface AgentOverride {
+  agent_id: string;
+  fear?: number;
+  greed?: number;
+  confidence?: number;
+  excitement?: number;
+  trust?: number;
+  strategy?: string;
+  portfolio_weights?: Record<string, number>;
+}
+
 export interface MarketEventInput {
   uid?: string;
   text: string;
   is_rumor?: boolean;
+  agent_override?: AgentOverride;
 }
 
 /* ── Core request helper ── */
@@ -196,6 +208,7 @@ export function marketEvent(
     uid: input.uid,
     text: input.text,
     is_rumor: input.is_rumor ?? false,
+    ...(input.agent_override ? { agent_override: input.agent_override } : {}),
   });
 }
 
@@ -222,7 +235,7 @@ export interface OverallReportResponse {
 
 /* ── Session persistence (localStorage) ── */
 
-const SESSION_KEY = "market_aquarium_uid";
+const SESSION_KEY = "market_village_uid";
 
 export function saveSessionUid(uid: string): void {
   if (typeof window !== "undefined") localStorage.setItem(SESSION_KEY, uid);

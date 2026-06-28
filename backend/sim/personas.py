@@ -25,7 +25,8 @@ def _load_allocations() -> dict:
     from backend.db import _db
     docs = list(_db().allocations.find())
     if not docs:
-        raise RuntimeError("allocations not found in MongoDB — run: python -m backend.seed")
+        # ponytail: allow seed to run without pre-existing allocations
+        return {}
     result = {}
     for d in docs:
         pid = d["_id"]
@@ -49,7 +50,8 @@ def _load_personas_from_db() -> list[Persona]:
     from backend.db import _db
     docs = list(_db().personas.find())
     if not docs:
-        raise RuntimeError("personas not found in MongoDB — run: python -m backend.seed")
+        # ponytail: fallback to hardcoded pool when DB is empty (e.g. during seed)
+        return list(_HARDCODED_POOL)
     return [Persona(**{k: v for k, v in d.items() if k != "_id"}) for d in docs]
 
 
@@ -224,12 +226,33 @@ _HARDCODED_POOL: list[Persona] = [
         herd_sensitivity=0.5,
         rumor_sensitivity=0.95,
     ),
+    Persona(
+        persona_id="player",
+        alias="플레이어",
+        type=AgentType.VALUE_INVESTOR,  # neutral default type
+        sprite="/assets/characters/Sam_Moore.png",
+        color="#E8A43A",
+        innate="adaptable, player-controlled, follows the player's strategy each round",
+        learned="takes direction from the player before each round",
+        currently="waiting for the player's strategy instructions",
+        lifestyle="adjusts approach based on player input each round",
+        daily_req="follow the player's strategy and emotion settings",
+        cash_pool=[10_000_000, 20_000_000, 50_000_000],
+        portfolio_symbol_pool=["BTC", "ETH", "SOL", "XRP", "LINK"],
+        default_fear=50,
+        default_greed=50,
+        default_confidence=50,
+        default_excitement=50,
+        default_trust=50,
+        herd_sensitivity=0.3,
+        rumor_sensitivity=0.3,
+    ),
 ]
 
 PERSONA_POOL: list[Persona] = _load_personas_from_db()
 
 # The MVP default 6 (PRD §0 #9) -- matches the frontend's 6 default profiles.
-DEFAULT_PERSONA_IDS = ["panic", "fomo", "value", "quant", "whale", "contrarian"]
+DEFAULT_PERSONA_IDS = ["panic", "fomo", "value", "quant", "contrarian", "player"]
 
 # --------------------------------------------------------------------------- #
 # SNS-only crowd (D2): extra characters that live ONLY on the board. They never
@@ -279,6 +302,10 @@ SNS_PERSONA_POOL: list[Persona] = [
 ]
 
 _POOL_BY_ID = {p.persona_id: p for p in PERSONA_POOL}
+# Ensure hardcoded personas (e.g. player) are always available even if not in MongoDB
+for _hp in _HARDCODED_POOL:
+    if _hp.persona_id not in _POOL_BY_ID:
+        _POOL_BY_ID[_hp.persona_id] = _hp
 _SNS_BY_ID = {p.persona_id: p for p in SNS_PERSONA_POOL}
 
 

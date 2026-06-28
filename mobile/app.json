@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Market Aquarium",
-    "slug": "market-aquarium",
+    "name": "Market Village",
+    "slug": "market-village",
     "version": "1.0.0",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
@@ -11,11 +11,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "bundleIdentifier": "com.marketaquarium.mobile",
+      "bundleIdentifier": "com.marketvillage.mobile",
       "supportsTablet": true
     },
     "android": {
-      "package": "com.marketaquarium.mobile",
+      "package": "com.marketvillage.mobile",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff"

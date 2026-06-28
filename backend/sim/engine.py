@@ -1,4 +1,4 @@
-"""Round orchestration — the walking skeleton of the Market Aquarium loop.
+"""Round orchestration — the walking skeleton of the Market Village loop.
 
 This composes the FR modules into the core thesis flow per round:
 
@@ -57,6 +57,7 @@ _PLAN_TEMPLATES = {
     "quant": "지표·변동성 점검 → 신호대로 기계적 매매",
     "whale": "대중 공포 관찰 → 거래소에서 대량 매집",
     "contrarian": "군중과 반대로 → 공포엔 매수, 탐욕엔 매도",
+    "player": "플레이어의 전략에 따라 행동",
     "news_bot": "뉴스 요약 → 게시판에 공유",
     "conspiracy": "불확실 이벤트 탐색 → 자극적 해석 게시",
 }
@@ -471,6 +472,47 @@ class GameSession:
             else:
                 out[a.id] = {axis: round(cur[axis] - prev[axis], 1) for axis in self._EMO_AXES}
         return out
+
+    def apply_agent_override(self, override: dict) -> None:
+        """Apply user's pre-round emotion/strategy override to a specific agent."""
+        agent_id = override["agent_id"]
+        agent = next((a for a in self.agents if a.id == agent_id), None)
+        if not agent:
+            return
+        for axis in ("fear", "greed", "confidence", "excitement", "trust"):
+            val = override.get(axis)
+            if val is not None:
+                setattr(agent, axis, max(0.0, min(100.0, float(val))))
+        if override.get("strategy"):
+            # ponytail: enrich short user strategy into a detailed LLM prompt
+            user_strat = override["strategy"]
+            agent.currently = (
+                f"[플레이어 지시] {user_strat}. "
+                f"이 전략에 따라 이번 라운드의 모든 판단(감정 반응, 게시판 활동, 매매 결정)을 내린다. "
+                f"현재 공포 {agent.fear:.0f}/100, 탐욕 {agent.greed:.0f}/100이며 "
+                f"이 감정 상태가 전략 실행에 반영되어야 한다."
+            )
+        # Portfolio weight adjustment: {"BTC": 30, "ETH": 50, "SOL": 20} (percentages)
+        weights = override.get("portfolio_weights")
+        if weights and isinstance(weights, dict):
+            prices = {a.symbol: a.price for a in self.assets}
+            total_value = agent.cash + sum(
+                h.amount * prices.get(h.asset, h.avgPrice) for h in agent.portfolio
+            )
+            from .models import PortfolioHolding
+            new_holdings = []
+            allocated = 0.0
+            for sym, pct in weights.items():
+                price = prices.get(sym)
+                if not price or price <= 0 or pct <= 0:
+                    continue
+                invest = total_value * float(pct) / 100.0
+                amount = round(invest / price, 6)
+                if amount > 0:
+                    new_holdings.append(PortfolioHolding(asset=sym, amount=amount, avgPrice=price))
+                    allocated += invest
+            agent.portfolio = new_holdings
+            agent.cash = max(0.0, total_value - allocated)
 
     def state(self) -> dict:
         """FE-facing snapshot (shapes mirror frontend mock_data types)."""

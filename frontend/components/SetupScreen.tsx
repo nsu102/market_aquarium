@@ -50,7 +50,7 @@ interface SetupAgent {
 }
 
 interface Props {
-  onStart: (agents: Agent[], assets: Asset[], presetIndices?: Record<string, number>) => void;
+  onStart: (agents: Agent[], assets: Asset[], presetIndices?: Record<string, number>, userAgentId?: string) => void;
   onResume?: () => void;
 }
 
@@ -75,7 +75,6 @@ export default function SetupScreen({ onStart, onResume }: Props) {
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [presets, setPresets] = useState<PresetsMap | null>(null);
   const [presetIndices, setPresetIndices] = useState<Record<string, number>>({});
-
   useEffect(() => {
     setHasSavedSession(!!loadSessionUid());
     fetchPresets().then((p) => {
@@ -228,7 +227,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
       symbol: a.symbol, name: a.name, price: a.price, change24h: 0, volume: 0,
       priceHistory: seedPriceHistory(a.symbol, a.price),
     }));
-    onStart(finalAgents, finalAssets, Object.keys(presetIndices).length > 0 ? presetIndices : undefined);
+    onStart(finalAgents, finalAssets, Object.keys(presetIndices).length > 0 ? presetIndices : undefined, "player");
   };
 
   const totalValue = useMemo(() => {
@@ -281,7 +280,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
                     className={`w-full flex items-center gap-2 px-2 py-[7px] text-left cursor-pointer border-l-4 ${sel ? "bg-pixel-path border-pixel-gold" : "border-transparent hover:bg-pixel-path"
                       } ${!agent.enabled ? "opacity-30" : ""}`}
                   >
-                    <div className="w-7 h-7 border-2 border-black rounded-lg bg-white overflow-hidden flex items-center justify-center flex-shrink-0">
+                    <div className="w-7 h-7 border-2 border-black rounded-lg bg-white overflow-hidden flex items-center justify-center flex-shrink-0 relative">
                       <Image src={agent.profile} alt="" width={22} height={22} style={{ imageRendering: "pixelated" }} />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -330,7 +329,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
                 <button onClick={() => nav(1)} disabled={selectedIdx === agents.length - 1} aria-label="다음" className="text-pixel-muted hover:text-pixel-gold disabled:opacity-20 cursor-pointer"><ChevronRight size={14} /></button>
               </div>
 
-              <p className="text-[9px] text-pixel-muted text-center leading-[1.5] max-w-[180px]">{selected.description}</p>
+              <p className="text-[9px] text-pixel-muted text-center leading-[1.5] max-w-[180px] mb-2">{selected.description}</p>
             </div>
 
             {/* Traits + Delete */}

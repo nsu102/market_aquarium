@@ -1,4 +1,4 @@
-"""Shared domain models for the Market Aquarium simulation.
+"""Shared domain models for the Market Village simulation.
 
 This module is the single source of truth for the data contract between the
 simulation engine, the FastAPI surface, and the Next.js frontend. The field

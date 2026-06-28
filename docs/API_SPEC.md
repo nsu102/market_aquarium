@@ -1,4 +1,4 @@
-# Market Aquarium API 명세서
+# Market Village API 명세서
 
 ## Base URL
 

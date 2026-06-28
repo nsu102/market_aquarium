@@ -79,10 +79,11 @@ def build_round_report(
     breakdowns: list[PriceBreakdown],
     agents: list[Agent],
     trades: list[TradeResult],
+    emotion_deltas: dict[str, dict] | None = None,
 ) -> RoundReport:
     """Assemble a single round's report (indices + per-asset attribution)."""
     share = emotion_contribution_share(breakdowns)
-    markdown = _round_markdown(round, market, breakdowns, trades, share, agents)
+    markdown = _round_markdown(round, market, breakdowns, trades, share, agents, emotion_deltas)
     return RoundReport(
         round=round,
         fearGreedIndex=market.fearGreedIndex,
@@ -97,6 +98,12 @@ def build_round_report(
 _ACTION_KR = {"BUY": "매수", "SELL": "매도", "BUY_LARGE": "대량매수", "HOLD": "관망"}
 
 
+def _fmt_delta(v: float) -> str:
+    """Format a delta as +N / -N / 0 for inline display."""
+    v = round(v)
+    return f"+{v}" if v > 0 else str(v)
+
+
 def _round_markdown(
     round: int,
     market: MarketData,
@@ -104,6 +111,7 @@ def _round_markdown(
     trades: list[TradeResult],
     share: float,
     agents: list[Agent] | None = None,
+    emotion_deltas: dict[str, dict] | None = None,
 ) -> str:
     """Render the Korean markdown body for a round report (no emoji)."""
     lines: list[str] = []
@@ -150,18 +158,51 @@ def _round_markdown(
     # --- Per-agent metrics -------------------------------------------------
     if agents:
         trade_by_agent = {t.agent_id: t for t in trades}
+        ed = emotion_deltas or {}
         lines.append("## 에이전트 지표")
         lines.append("")
-        lines.append("| 에이전트 | 행동 | 종목 | 공포 | 탐욕 |")
-        lines.append("| --- | --- | --- | --- | --- |")
+        lines.append("| 에이전트 | 행동 | 종목 | 공포 | 탐욕 | 자신감 | 흥분 | 신뢰 |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
         for a in agents:
             t = trade_by_agent.get(a.id)
             action = _ACTION_KR.get(a.lastAction, a.lastAction or "-")
             symbol = (t.symbol if t and t.symbol else "-")
+            d = ed.get(a.id, {})
             lines.append(
-                f"| {a.alias} | {action} | {symbol} | {a.fear:.0f} | {a.greed:.0f} |"
+                f"| {a.alias} | {action} | {symbol}"
+                f" | {a.fear:.0f}({_fmt_delta(d.get('fear', 0))})"
+                f" | {a.greed:.0f}({_fmt_delta(d.get('greed', 0))})"
+                f" | {a.confidence:.0f}({_fmt_delta(d.get('confidence', 0))})"
+                f" | {a.excitement:.0f}({_fmt_delta(d.get('excitement', 0))})"
+                f" | {a.trust:.0f}({_fmt_delta(d.get('trust', 0))}) |"
             )
         lines.append("")
+
+    # --- Player focus section ------------------------------------------------
+    if agents:
+        player = next((a for a in agents if a.id == "player"), None)
+        if player:
+            ed = emotion_deltas or {}
+            pd = ed.get("player", {})
+            pt = next((t for t in trades if t.agent_id == "player"), None)
+            p_action = _ACTION_KR.get(player.lastAction, player.lastAction or "-")
+            lines.append("## 내 에이전트 분석")
+            lines.append("")
+            lines.append(f"**{player.alias}** 의 이번 라운드 행동: **{p_action}**"
+                         + (f" ({pt.symbol})" if pt and pt.symbol else ""))
+            lines.append("")
+            lines.append("| 감정 | 현재 | 변화 |")
+            lines.append("| --- | --- | --- |")
+            for axis, label in [("fear", "공포"), ("greed", "탐욕"),
+                                ("confidence", "자신감"), ("excitement", "흥분"),
+                                ("trust", "신뢰")]:
+                val = getattr(player, axis, 50)
+                delta = pd.get(axis, 0)
+                lines.append(f"| {label} | {val:.0f} | {_fmt_delta(delta)} |")
+            lines.append("")
+            # Educational insight based on player state
+            lines.append(_player_insight(player, share, pt))
+            lines.append("")
 
     # --- Trade summary -----------------------------------------------------
     lines.append("## 매매 요약")
@@ -171,6 +212,12 @@ def _round_markdown(
         lines.append(f"총 {len(traded)}건의 매매가 발생했습니다.")
     else:
         lines.append("이번 라운드에는 매매가 없었습니다.")
+
+    # --- Educational message -----------------------------------------------
+    lines.append("")
+    lines.append("## 투자 인사이트")
+    lines.append("")
+    lines.append(_educational_message(share, market))
 
     return "\n".join(lines)
 
@@ -335,6 +382,63 @@ def _overall_markdown(
         lines.append("이번 게임에서는 달성된 업적이 없습니다.")
 
     return "\n".join(lines)
+
+
+def _player_insight(player: Agent, share: float, trade: TradeResult | None) -> str:
+    """One educational paragraph about the player's round behavior."""
+    fear, greed = player.fear, player.greed
+    if fear > 70 and trade and trade.action == Action.SELL:
+        return (
+            "높은 공포 속에서 매도를 선택했습니다. "
+            "공포에 의한 매도는 손실을 확정짓는 경우가 많습니다. "
+            "손절이 전략적 판단인지, 감정적 반응인지 구분하는 것이 중요합니다."
+        )
+    if greed > 70 and trade and trade.action in (Action.BUY, Action.BUY_LARGE):
+        return (
+            "높은 탐욕 상태에서 매수에 나섰습니다. "
+            "FOMO에 의한 추격 매수는 고점 매수로 이어질 수 있습니다. "
+            "매수 전 냉정하게 기본 가치를 점검하는 습관이 필요합니다."
+        )
+    if fear < 30 and greed < 30:
+        return (
+            "감정이 비교적 안정된 상태입니다. "
+            "이런 때가 가장 이성적인 판단을 내릴 수 있는 시점입니다."
+        )
+    if trade and trade.action == Action.HOLD:
+        return (
+            "관망을 선택했습니다. 때로는 아무것도 하지 않는 것이 최선의 전략입니다. "
+            "확신이 없을 때 무리하게 포지션을 잡는 것보다 낫습니다."
+        )
+    return (
+        f"공포 {fear:.0f}, 탐욕 {greed:.0f} 상태에서 행동했습니다. "
+        "자신의 감정 상태를 인지하고 매매하는 것이 감정적 손실을 줄이는 첫 걸음입니다."
+    )
+
+
+def _educational_message(share: float, market: MarketData) -> str:
+    """Round-end educational tip based on market conditions."""
+    fgi = market.fearGreedIndex
+    if share > 0.4:
+        return (
+            "이번 라운드는 감정이 가격 변동의 주요 원인이었습니다. "
+            "실제 시장에서도 뉴스 자체보다 뉴스에 대한 '반응'이 가격을 움직입니다. "
+            "군중의 감정에 휩쓸리지 않고 자신만의 기준을 세우는 것이 핵심입니다."
+        )
+    if fgi < 30:
+        return (
+            "시장이 극도의 공포 상태입니다. 역사적으로 극단적 공포는 "
+            "오히려 매수 기회였던 경우가 많습니다. 다만 '떨어지는 칼날'을 잡는 것과 "
+            "'바닥에서 줍는 것'은 결과적으로만 구분됩니다."
+        )
+    if fgi > 70:
+        return (
+            "시장이 탐욕 상태입니다. 모두가 낙관할 때가 가장 위험한 시점일 수 있습니다. "
+            "'남들이 탐욕스러울 때 두려워하라'는 격언을 기억하세요."
+        )
+    return (
+        "시장 심리가 중립적입니다. 이런 구간에서는 감정보다 "
+        "펀더멘탈과 데이터 기반의 판단이 더 나은 결과를 가져옵니다."
+    )
 
 
 def _trend_comment(round_reports: list[RoundReport]) -> str:

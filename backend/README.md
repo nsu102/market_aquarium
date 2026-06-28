@@ -1,4 +1,4 @@
-# Market Aquarium — Simulation Backend
+# Market Village — Simulation Backend
 
 The market-logic API the frontend talks to. It composes the FR modules into the
 core thesis loop per round:
@@ -45,11 +45,11 @@ docker compose up -d          # MongoDB 27018 포트
 ```
 
 Connection string: `mongodb://localhost:27018`
-DB name: `market_aquarium`
+DB name: `market_village`
 
 환경변수로 오버라이드 가능:
 - `MONGO_URI` (기본 `mongodb://localhost:27018`)
-- `MONGO_DB` (기본 `market_aquarium`)
+- `MONGO_DB` (기본 `market_village`)
 
 ### 2. 시드 데이터 삽입
 

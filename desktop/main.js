@@ -9,7 +9,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     icon: path.join(__dirname, "icon.ico"),
-    title: "Market Aquarium",
+    title: "Market Village",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

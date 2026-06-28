@@ -8,7 +8,7 @@
  * asset URLs are absolute against API_BASE to keep Phaser and fetch in sync.
  *
  * The per-step movement payload's `meta.market` / `meta.posts` shapes are
- * aligned with the market_aquarium frontend types and reused directly.
+ * aligned with the market_village frontend types and reused directly.
  */
 
 import { MarketData } from "@/mock_data/market";

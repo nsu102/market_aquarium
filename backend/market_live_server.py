@@ -1,4 +1,4 @@
-"""Market Aquarium LIVE server — self-built loop (reverie used only as map/path lib).
+"""Market Village LIVE server — self-built loop (reverie used only as map/path lib).
 
 The game is driven by ``backend.sim.engine.GameSession`` (our workflow:
 event -> emotion -> board posts -> trades -> price -> round report). reverie's
@@ -110,7 +110,7 @@ def _stable_int(text: str) -> int:
 # --------------------------------------------------------------------------- #
 # App + shared state
 # --------------------------------------------------------------------------- #
-app = FastAPI(title="Market Aquarium Live")
+app = FastAPI(title="Market Village Live")
 
 # Pre-warm the sentiment model so the first event doesn't pay the load cost.
 import threading
@@ -548,11 +548,23 @@ class ResumeBody(BaseModel):
     sim_code: str | None = None
 
 
+class AgentOverride(BaseModel):
+    agent_id: str
+    fear: float | None = None
+    greed: float | None = None
+    confidence: float | None = None
+    excitement: float | None = None
+    trust: float | None = None
+    strategy: str | None = None  # injected into agent.currently
+    portfolio_weights: dict[str, float] | None = None  # symbol -> percentage
+
+
 class EventBody(BaseModel):
     uid: str | None = None
     text: str
     is_rumor: bool = False
     source: str = "user"
+    agent_override: AgentOverride | None = None
 
 
 class StepBody(BaseModel):
@@ -688,6 +700,8 @@ def control_market_event(body: EventBody):
                 "error": "5 라운드 종료 — 재시작하세요"}
     live.start_market = live.game.market.model_dump()
     live.start_prices = {a.symbol: a.price for a in live.game.assets}
+    if body.agent_override:
+        live.game.apply_agent_override(body.agent_override.model_dump())
     try:
         live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
     except RuntimeError as e:

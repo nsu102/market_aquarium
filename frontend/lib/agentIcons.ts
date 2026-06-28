@@ -3,7 +3,6 @@ import {
   TrendingUp,
   Gem,
   BarChart3,
-  Waves,
   Repeat,
   Megaphone,
   User,
@@ -34,9 +33,9 @@ export const AGENT_ICONS: Record<string, LucideIcon> = {
   // 퀀트 트레이더
   quant: BarChart3,
   "퀀트 트레이더": BarChart3,
-  // 매크로 고래
-  whale: Waves,
-  "매크로 고래": Waves,
+  // 플레이어
+  player: User,
+  "플레이어": User,
   // 역발상 투자자
   contrarian: Repeat,
   "역발상 투자자": Repeat,
