@@ -563,13 +563,11 @@ export default function Home() {
         <RoundReport report={reportForView} onClose={() => setReportOpen(false)} />
       )}
 
-      {/* Computing a round (LLM) — show progress so the wait is not a dead screen */}
+      {/* Computing a round (LLM) — non-blocking pill indicator */}
       {computing && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-pixel-ink/60">
-          <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg px-6 py-5 flex flex-col items-center gap-3 max-w-[320px]">
-            <Loader2 size={28} className="text-pixel-greenText animate-spin" />
-            <div className="text-sm font-bold text-black">에이전트들이 반응하는 중...</div>
-          </div>
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 bg-white border-2 border-black rounded-full shadow-pixel-sm px-4 py-2">
+          <Loader2 size={14} className="text-pixel-greenText animate-spin" />
+          <span className="text-[12px] font-bold text-black">에이전트 반응 중</span>
         </div>
       )}
 
