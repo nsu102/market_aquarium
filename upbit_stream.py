@@ -22,7 +22,10 @@ import asyncio
 from collections import defaultdict
 
 import requests
-import websockets
+
+# websockets 는 (2) WS 실시간 스트림에서만 쓰는 post-MVP 옵션 의존성이다.
+# MVP 경로(REST 스냅샷 / universe 로더 / listup import)가 이 패키지 없이도
+# 돌도록 모듈 최상단이 아니라 stream() 안에서 지연 import 한다.
 
 UPBIT_REST = "https://api.upbit.com/v1"
 UPBIT_WS = "wss://api.upbit.com/websocket/v1"
@@ -103,6 +106,8 @@ def sector_rollup(latest, code2sector, code2weight):
 
 
 async def stream(markets, code2sector, code2weight, print_every=2.0):
+    import websockets  # post-MVP 옵션: WS 스트림 쓸 때만 필요
+
     latest = {}  # code -> signed_change_rate
     last_print = 0.0
     sub = build_subscribe(markets)

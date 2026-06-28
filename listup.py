@@ -29,6 +29,7 @@ BE/다른 모듈에서 import:
 """
 
 import os
+import sys
 import json
 from datetime import datetime, timezone
 
@@ -83,6 +84,14 @@ def get_assets(with_prices=True):
     markets = u["markets"]
     names = fetch_korean_names(markets)
     rows = fetch_initial_prices(markets) if with_prices else {}
+
+    # universe 종목이 업비트에서 사라지면(상장폐지 등) ticker 응답에서 빠진다.
+    # 이때 price=None 이 FE(price: number) 계약을 깨므로, 조용히 넘기지 않고 경고한다.
+    if with_prices:
+        gone = [m for m in markets if m not in rows]
+        if gone:
+            print(f"[listup] 경고: 업비트 ticker 미응답 {len(gone)}종목 {gone} "
+                  f"— 상장폐지 가능성. freeze_universe.py 재실행 검토.", file=sys.stderr)
 
     assets = []
     for sector, items in u["sectors"].items():
