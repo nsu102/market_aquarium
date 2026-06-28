@@ -36,6 +36,8 @@ export interface ControlStatus {
 export interface StartResponse {
   status?: string;
   sim_code: string;
+  uid: string;
+  seed: number;
   step: number;
 }
 
@@ -64,6 +66,7 @@ export interface MarketStateResponse {
 }
 
 export interface MarketEventInput {
+  uid?: string;
   text: string;
   is_rumor?: boolean;
 }
@@ -130,8 +133,9 @@ function postJson<T>(path: string, body?: unknown): Promise<T> {
 
 /* ── Endpoints ── */
 
-export function getStatus(): Promise<ControlStatus> {
-  return getJson<ControlStatus>("/control/status");
+export function getStatus(uid?: string): Promise<ControlStatus> {
+  const q = uid ? `?uid=${uid}` : "";
+  return getJson<ControlStatus>(`/control/status${q}`);
 }
 
 /** Fork `fork_sim_code` into a fresh `sim_code` and load it. */
@@ -143,8 +147,8 @@ export function start(
 }
 
 /** Run N steps in the background; the simulator drives them via process/update. */
-export function run(count: number): Promise<RunResponse> {
-  return postJson<RunResponse>("/control/run", { count });
+export function run(count: number, uid?: string): Promise<RunResponse> {
+  return postJson<RunResponse>("/control/run", { uid, count });
 }
 
 /** Inject the round's global event (FR-1). */
@@ -152,14 +156,16 @@ export function marketEvent(
   input: MarketEventInput
 ): Promise<MarketEventResponse> {
   return postJson<MarketEventResponse>("/control/market/event", {
+    uid: input.uid,
     text: input.text,
     is_rumor: input.is_rumor ?? false,
   });
 }
 
 /** Snapshot of the current market state (ready=false before the sim starts). */
-export function marketState(): Promise<MarketStateResponse> {
-  return getJson<MarketStateResponse>("/control/market/state");
+export function marketState(uid?: string): Promise<MarketStateResponse> {
+  const q = uid ? `?uid=${uid}` : "";
+  return getJson<MarketStateResponse>(`/control/market/state${q}`);
 }
 
 export interface OverallAchievement {
@@ -178,6 +184,7 @@ export interface OverallReportResponse {
 }
 
 /** Overall end-of-game report + achievements (FR-9/FR-10), shown when 5 rounds finish. */
-export function overallReport(): Promise<OverallReportResponse> {
-  return getJson<OverallReportResponse>("/control/report/overall");
+export function overallReport(uid?: string): Promise<OverallReportResponse> {
+  const q = uid ? `?uid=${uid}` : "";
+  return getJson<OverallReportResponse>(`/control/report/overall${q}`);
 }

@@ -54,6 +54,7 @@ export interface GameControls {
 
 interface Props {
   simCode: string;
+  uid?: string;
   onTick: (meta: ReverieMeta) => void;
   /** Optional ref the scene populates with zoom controls for the HUD. */
   controlsRef?: MutableRefObject<GameControls | null>;
@@ -65,7 +66,7 @@ interface Props {
 
 type LoadPhase = "loading" | "ready" | "down" | "error";
 
-export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgent, onRoundEnd }: Props) {
+export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelectAgent, onRoundEnd }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onTickRef = useRef(onTick);
   onTickRef.current = onTick;
@@ -95,7 +96,7 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
     setHasMovement(false);
 
     const poll = () => {
-      getHome()
+      getHome(uid)
         .then((r) => {
           if (!alive) return;
           if (isBackendNotStarted(r)) {
@@ -416,7 +417,7 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
         // we don't spam the server while no run is active (agents stay idle).
         if (updateInFlight || Date.now() < nextUpdatePollAt) return;
         updateInFlight = true;
-        updateEnvironment(step, simCode)
+        updateEnvironment(step, simCode, uid)
           .then((resp) => {
             if (resp["<step>"] === step) {
               // Movement for this step is ready — animate it.
