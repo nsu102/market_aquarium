@@ -28,12 +28,9 @@ import {
   getHome,
   initialsOf,
   isBackendNotStarted,
-  processEnvironment,
-  updateEnvironment,
   type GamePersona,
   type HomeResponse,
   type MovementUpdateResponse,
-  type ProcessEnvironmentBody,
   type ReverieMeta,
 } from "@/lib/reverieApi";
 import { AGENT_PROFILES } from "@/constants/agentProfiles";
@@ -50,7 +47,7 @@ const ALIAS_MAP: Record<string, string> = Object.fromEntries(
 const CURR_MAZE = "the_ville";
 // px/frame. TILE_WIDTH must divide evenly so personas land exactly on tiles.
 // 16 -> 2 frames/tile (2x faster day animation; 8 felt too slow).
-const MOVEMENT_SPEED = 16;
+const MOVEMENT_SPEED = 8;
 const HOME_POLL_MS = 1200;
 // While no run is active the /update poll returns not-ready (<step> === -1).
 // Back off between such polls so we don't hammer the server every frame.
@@ -148,17 +145,16 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
     const executeCountMax = TILE_WIDTH / movementSpeed;
 
     // ---- mutable game state closed over by the scene callbacks ----
-    let step = initialStepRef.current;
-    let loopPhase: "process" | "update" | "execute" = "process";
-    let updateInFlight = false;
     let executeMovement: MovementUpdateResponse | null = null;
     let executeCount = executeCountMax;
-    // Timestamp gate: when a /update poll comes back not-ready (no run active),
-    // wait UPDATE_BACKOFF_MS before re-polling instead of spamming every frame.
-    let nextUpdatePollAt = 0;
     // Round-end detection: fire onRoundEnd once when a round's timeline drains.
     let lastMetaRound: number | null = null;
     let firedRoundEnd: number | null = null;
+
+    // ---- websocket step queue ----
+    const stepQueue: MovementUpdateResponse[] = [];
+    let wsConnected = false;
+    let timelineEnded = false; // server sent <step>=-1, but queue may still have steps
 
     const personaSprites: Record<string, Phaser.GameObjects.Sprite> = {};
     const labels: Record<string, Phaser.GameObjects.Text> = {};
@@ -291,9 +287,13 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
         "wheel",
         (_p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) => {
           const cam = this.cameras.main;
-          cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.3, 2));
+          cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.4, 1.0));
         }
       );
+
+      // Prevent browser pinch-zoom on the game canvas
+      const canvas = this.game.canvas;
+      canvas.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
 
       // *** PERSONAS ***
       personasMeta.forEach((p) => {
@@ -315,8 +315,8 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
         // Full alias label above sprite.
         const alias = ALIAS_MAP[name] || p.original;
         labels[name] = this.add
-          .text(sprite.body.x - 6, sprite.body.y - 74, alias, {
-            font: "bold 32px Galmuri11, sans-serif",
+          .text(sprite.body.x - 6, sprite.body.y - 50, alias, {
+            font: "bold 32px sans-serif",
             color: "#1E1A17",
             padding: { x: 6, y: 3 },
             backgroundColor: "#ffffffcc",
@@ -327,13 +327,14 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
 
       // *** BUILDING LABELS ***
       const buildingLabels = [
-        { x: 63, y: 41, text: "게시판", bg: "#2E7D32cc" },
-        { x: 84, y: 41, text: "매매소", bg: "#C85A4Acc" },
+        { x: 32, y: 45, text: "게시판", bg: "#2E7D32cc" },
+        { x: 63, y: 41, text: "거래소", bg: "#C85A4Acc" },
+        { x: 84, y: 41, text: "카페", bg: "#A8741Acc" },
       ];
       buildingLabels.forEach(({ x, y, text, bg }) => {
         this.add
           .text(x * TILE_WIDTH + TILE_WIDTH / 2, y * TILE_WIDTH, text, {
-            font: "bold 36px Galmuri11, sans-serif",
+            font: "bold 36px sans-serif",
             color: "#ffffff",
             padding: { x: 10, y: 6 },
             backgroundColor: bg,
@@ -368,9 +369,9 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       if (controlsRef) {
         controlsRef.current = {
           zoomIn: () =>
-            camera.setZoom(Phaser.Math.Clamp(camera.zoom + 0.15, 0.3, 2)),
+            camera.setZoom(Phaser.Math.Clamp(camera.zoom + 0.15, 0.4, 1.0)),
           zoomOut: () =>
-            camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.3, 2)),
+            camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.4, 1.0)),
           setKeyboardEnabled: (on: boolean) => {
             if (this.input.keyboard) this.input.keyboard.enabled = on;
           },
@@ -378,37 +379,55 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       }
     }
 
-    // ponytail: trade card tags stored per-persona, created lazily
-    const tradeCards: Record<string, Phaser.GameObjects.Text> = {};
+    // Phaser Text trade cards per agent (pixel style)
+    const tradeCardTexts: Record<string, Phaser.GameObjects.Text> = {};
+
+    function showTradeCard(under: string, info: { action: string; symbol: string; qty: number; price: number; cash_after: number }) {
+      const sprite = personaSprites[under];
+      if (!sprite) return;
+      const body = sprite.body as Phaser.Physics.Arcade.Body;
+      const isSell = info.action.includes("SELL");
+      const isLarge = info.action.includes("LARGE");
+      const actionText = isSell ? "매도" : "매수";
+      const bg = isSell ? "#C0564A" : "#327A1C";
+      const label = `${info.symbol} ${actionText}${isLarge ? "!" : ""}`;
+
+      if (!tradeCardTexts[under]) {
+        tradeCardTexts[under] = sceneRef.add
+          .text(body.x, body.y - 100, label, {
+            font: "bold 24px sans-serif",
+            color: "#ffffff",
+            backgroundColor: bg,
+            padding: { x: 8, y: 4 },
+          })
+          .setOrigin(0.5, 1)
+          .setDepth(5);
+      } else {
+        tradeCardTexts[under]
+          .setText(label)
+          .setBackgroundColor(bg)
+          .setVisible(true);
+      }
+    }
+
+    function hideTradeCard(under: string) {
+      if (tradeCardTexts[under]) {
+        tradeCardTexts[under].setVisible(false);
+      }
+    }
 
     function setLabel(under: string, original: string, description?: string) {
       const alias = ALIAS_MAP[under] || original;
       labels[under]?.setText(alias);
-      // Show/update trade card when the description mentions 매매/거래소
-      if (description && /거래소|매수|매도|관망/.test(description)) {
-        const sprite = personaSprites[under];
-        if (!sprite) return;
-        const body = sprite.body as Phaser.Physics.Arcade.Body;
-        if (!tradeCards[under]) {
-          tradeCards[under] = sceneRef.add
-            .text(body.x, body.y - 100, "", {
-              font: "bold 24px Galmuri11, sans-serif",
-              color: "#ffffff",
-              padding: { x: 8, y: 4 },
-              backgroundColor: "#00000099",
-            })
-            .setOrigin(0.5, 1)
-            .setDepth(4);
-        }
-        // Color by action type
-        const isBuy = /매수/.test(description);
-        const isSell = /매도/.test(description);
-        const bg = isBuy ? "#2E7D32cc" : isSell ? "#C62828cc" : "#555555cc";
-        tradeCards[under].setBackgroundColor(bg);
-        tradeCards[under].setText(description);
-        tradeCards[under].setVisible(true);
-      } else if (tradeCards[under]) {
-        tradeCards[under].setVisible(false);
+      // Parse trade info from description "거래소에서 매수||{json}"
+      if (description && description.includes("||")) {
+        try {
+          const json = description.split("||")[1];
+          const info = JSON.parse(json);
+          showTradeCard(under, info);
+        } catch { hideTradeCard(under); }
+      } else {
+        hideTradeCard(under);
       }
     }
 
@@ -442,11 +461,11 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       const label = labels[under];
       if (label) {
         label.x = body.x - 6;
-        label.y = body.y - 74;
+        label.y = body.y - 50;
       }
-      const card = tradeCards[under];
-      if (card) {
-        card.x = body.x - 6;
+      const card = tradeCardTexts[under];
+      if (card && card.visible) {
+        card.x = body.x;
         card.y = body.y - 100;
       }
 
@@ -474,67 +493,37 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       if (cursors.down.isDown) body.setVelocityY(cameraSpeed);
     }
 
-    // ---- simulate loop: process -> update -> execute ----
+    // ---- websocket connection ----
+    function connectWs() {
+      if (wsConnected) return;
+      const wsBase = API_BASE.replace(/^http/, "ws");
+      const ws = new WebSocket(`${wsBase}/ws/movement/${uid || "default"}`);
+      ws.onopen = () => { wsConnected = true; };
+      ws.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data["<step>"] === -1) {
+          // Mark timeline as ended; actual round-end fires when queue drains
+          timelineEnded = true;
+          return;
+        }
+        stepQueue.push(data);
+        if (!hasMovementRef.current) {
+          hasMovementRef.current = true;
+          setHasMovement(true);
+        }
+      };
+      ws.onclose = () => {
+        wsConnected = false;
+        setTimeout(connectWs, 1000);
+      };
+      ws.onerror = () => ws.close();
+    }
+    connectWs();
+
+    // ---- simulate loop: consume from websocket queue ----
     function updateSim() {
-      if (loopPhase === "process") {
-        const env: ProcessEnvironmentBody["environment"] = {};
-        personasMeta.forEach((p) => {
-          const body = personaSprites[p.underscore].body as Phaser.Physics.Arcade.Body;
-          env[p.original] = {
-            maze: CURR_MAZE,
-            x: Math.ceil(body.position.x / TILE_WIDTH),
-            y: Math.ceil(body.position.y / TILE_WIDTH),
-          };
-        });
-        processEnvironment({ step, sim_code: simCode, environment: env }).catch(
-          () => undefined
-        );
-        loopPhase = "update";
-        return;
-      }
-
-      if (loopPhase === "update") {
-        // One poll in flight at a time; back off after a not-ready response so
-        // we don't spam the server while no run is active (agents stay idle).
-        if (updateInFlight || Date.now() < nextUpdatePollAt) return;
-        updateInFlight = true;
-        updateEnvironment(step, simCode, uid)
-          .then((resp) => {
-            if (resp["<step>"] === step) {
-              // Movement for this step is ready — animate it.
-              executeMovement = resp;
-              loopPhase = "execute";
-              if (!hasMovementRef.current) {
-                hasMovementRef.current = true;
-                setHasMovement(true);
-              }
-            } else {
-              // Not ready (e.g. <step> === -1): no run active yet. Stay idle and
-              // re-poll quietly after a short backoff. No throw, no console spam.
-              nextUpdatePollAt = Date.now() + UPDATE_BACKOFF_MS;
-              // The round's timeline just drained -> the day ended. Fire once.
-              if (
-                hasMovementRef.current &&
-                lastMetaRound != null &&
-                firedRoundEnd !== lastMetaRound
-              ) {
-                firedRoundEnd = lastMetaRound;
-                onRoundEndRef.current?.(lastMetaRound);
-              }
-            }
-          })
-          .catch(() => {
-            // Transient error (server warming up): back off and retry quietly.
-            nextUpdatePollAt = Date.now() + UPDATE_BACKOFF_MS;
-          })
-          .finally(() => {
-            updateInFlight = false;
-          });
-        return;
-      }
-
-      {
-        // execute
+      // Currently animating a step
+      if (executeMovement && executeCount > 0) {
         personasMeta.forEach((p) => {
           const under = p.underscore;
           const unit = executeMovement?.persona?.[p.original];
@@ -543,12 +532,9 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
             movementTarget[under] = [cx * TILE_WIDTH, cy * TILE_WIDTH];
             setLabel(under, p.original, unit?.description);
           }
-          if (executeCount > 0) {
-            stepPersona(under);
-          }
+          stepPersona(under);
         });
 
-        // Emit the round meta once per step (market / posts / round).
         if (executeCount === executeCountMax) {
           const meta = executeMovement?.meta;
           if (meta) {
@@ -557,20 +543,30 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
           }
         }
 
+        executeCount--;
         if (executeCount <= 0) {
+          // Snap to target
           personasMeta.forEach((p) => {
             const body = personaSprites[p.underscore].body as Phaser.Physics.Arcade.Body;
             const t = movementTarget[p.underscore];
-            if (t) {
-              body.x = t[0];
-              body.y = t[1];
-            }
+            if (t) { body.x = t[0]; body.y = t[1]; }
           });
-          loopPhase = "process";
-          executeCount = executeCountMax + 1;
-          step = step + 1;
+          executeMovement = null;
         }
-        executeCount = executeCount - 1;
+        return;
+      }
+
+      // Grab next step from queue
+      if (stepQueue.length > 0) {
+        executeMovement = stepQueue.shift()!;
+        executeCount = executeCountMax;
+      } else if (timelineEnded && !executeMovement) {
+        // Queue drained + timeline ended + no active animation -> round is truly done
+        if (hasMovementRef.current && lastMetaRound != null && firedRoundEnd !== lastMetaRound) {
+          firedRoundEnd = lastMetaRound;
+          timelineEnded = false;
+          onRoundEndRef.current?.(lastMetaRound);
+        }
       }
     }
 

@@ -34,7 +34,9 @@ _REPO = normpath(join(_HERE, ".."))           # repo root
 sys.path.insert(0, _HERE)                     # maze / path_finder / utils (local)
 sys.path.insert(0, _REPO)                     # backend.sim
 
-from fastapi import FastAPI  # noqa: E402
+import asyncio  # noqa: E402
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -52,8 +54,9 @@ sys.path.insert(0, _REPO)
 # --------------------------------------------------------------------------- #
 # the_ville location mapping (use existing places).
 # --------------------------------------------------------------------------- #
-BOARD_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 게시판 (매매소2)
-EXCHANGE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 거래소 (매매소1)
+BOARD_TILE = (32, 45)  # 게시판
+EXCHANGE_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 거래소 (기존 게시판 위치)
+CAFE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 카페 (기존 거래소 위치)
 
 FORK_ENV0 = join(
     _REPO, "environment", "frontend_server", "storage",
@@ -161,8 +164,9 @@ class Live:
         self.exchange_arrival: dict[str, int] = {}
         actions = {a["agent_id"]: a for a in self.game.last_round_actions}
         rng = random.Random(self.game.seed + self.game.round)
-        board_t = self._tile_for(BOARD_ADDR)
+        board_t = BOARD_TILE
         exch_t = self._tile_for(EXCHANGE_ADDR)
+        cafe_t = self._tile_for(CAFE_ADDR)
 
         per_agent_frames: dict[str, list] = {}
         for p in self.persona:
@@ -173,15 +177,36 @@ class Live:
             arng = random.Random((hash(ag.id) & 0xFFFFFFFF) ^ (self.game.round * 2654435761))
             start_delay = arng.randint(0, 40)
             board_label = "게시판에 글 작성" if act.get("posted") else "게시판에서 분위기 확인"
-            exch_label = TRADE_LABEL.get(act.get("trade_action", "HOLD"), "거래소에서 관망")
+            trade_action = act.get("trade_action", "HOLD")
+            exch_label = TRADE_LABEL.get(trade_action, "거래소에서 관망")
+            # Encode trade details as JSON suffix so frontend can parse
+            if trade_action != "HOLD" and act.get("trade_symbol"):
+                import json as _json
+                trade_info = _json.dumps({
+                    "action": trade_action,
+                    "symbol": act["trade_symbol"],
+                    "qty": act.get("trade_qty", 0),
+                    "price": act.get("trade_price", 0),
+                    "cash_after": act.get("trade_cash_after", 0),
+                }, ensure_ascii=False)
+                exch_label = f"{exch_label}||{trade_info}"
 
-            # ponytail: simplified route — 집 → 게시판 → 거래소 → 집
+            # 집 → 게시판 → 거래소 → 카페 → (거래소/카페 추가 방문) → 집
             waypoints = [
                 (home, "집에서 하루 계획"),
                 (board_t or home, board_label),
                 (exch_t or home, exch_label),
-                (home, "집으로 귀가"),
+                (cafe_t or home, "카페에서 휴식"),
             ]
+            # 거래소/카페 추가 방문 (1~2회)
+            extra_visits = arng.randint(1, 2)
+            for _ in range(extra_visits):
+                if arng.random() < 0.5:
+                    waypoints.append((exch_t or home, "거래소 재방문"))
+                else:
+                    waypoints.append((cafe_t or home, "카페 재방문"))
+            waypoints.append((home, "집으로 귀가"))
+
             frames = [(home[0], home[1], "집에서 하루 계획") for _ in range(1 + start_delay)]
             for i in range(1, len(waypoints)):
                 seg = self._path(waypoints[i - 1][0], waypoints[i][0])
@@ -413,7 +438,10 @@ def control_start(body: StartBody):
     live = Live(body.sim_code, assets=assets, seed=seed)
     _SESSIONS[uid] = live
 
-    return {"status": "started", "sim_code": live.sim_code, "uid": uid, "seed": seed, "step": 0}
+    return {
+        "status": "started", "sim_code": live.sim_code, "uid": uid, "seed": seed, "step": 0,
+        "assets": [{"symbol": a.symbol, "name": a.name, "price": a.price, "change24h": a.change24h, "volume": a.volume, "sector": a.sector, "priceHistory": a.priceHistory} for a in assets],
+    }
 
 
 @app.post("/control/resume")
@@ -438,6 +466,12 @@ def control_resume(body: ResumeBody):
     live = Live(sim_code, assets=assets, seed=seed)
     # Restore engine state from DB
     live.game = GameSession.restore(game_state, assets=assets, seed=seed)
+    # Re-bind persona references to the restored agents
+    agents_by_id = {a.id: a for a in live.game.agents}
+    for p in live.persona:
+        restored = agents_by_id.get(p["agent"].id)
+        if restored:
+            p["agent"] = restored
     _SESSIONS[body.uid] = live
 
     return {
@@ -479,8 +513,8 @@ def control_market_event(body: EventBody):
     try:
         from backend import db
         db.save_game_state(body.uid, _st) if body.uid else None
-    except Exception:
-        pass  # ponytail: DB save is best-effort, game continues
+    except Exception as e:
+        print(f"[WARN] save_game_state failed: {e}")
 
     ev = live.game.events[0] if live.game.events else None
     return {"status": "ok", "round": live.game.round,
@@ -545,3 +579,41 @@ def api_env_update(body: StepBody):
     if live is None:
         return {"<step>": -1}
     return live.movement_payload(body.step)
+
+
+@app.websocket("/ws/movement/{uid}")
+async def ws_movement(websocket: WebSocket, uid: str):
+    """Stream the entire timeline step-by-step over a websocket.
+
+    The client connects after a round is kicked off. The server pushes each
+    step's payload at a fixed interval (no polling overhead, no network jitter
+    between steps). The client buffers and animates smoothly.
+    """
+    await websocket.accept()
+    # ponytail: 50ms per step → ~20 fps tile movement
+    STEP_INTERVAL = 0.05
+    try:
+        while True:
+            live = _get_live(uid)
+            if live is None or not live.timeline:
+                await asyncio.sleep(0.3)
+                continue
+            # Stream all steps from current position
+            base = live.base
+            for idx in range(len(live.timeline)):
+                payload = live.movement_payload(base + idx)
+                if payload.get("<step>", -1) == -1:
+                    break
+                await websocket.send_json(payload)
+                await asyncio.sleep(STEP_INTERVAL)
+            # Timeline drained — signal end and wait for next round
+            await websocket.send_json({"<step>": -1, "timeline_end": True})
+            # Wait until a new timeline appears
+            old_base = live.base
+            while True:
+                await asyncio.sleep(0.3)
+                live = _get_live(uid)
+                if live and live.base != old_base and live.timeline:
+                    break
+    except WebSocketDisconnect:
+        pass
