@@ -44,6 +44,13 @@ from path_finder import path_finder  # noqa: E402  (path util)
 from utils import collision_block_id  # noqa: E402  (config)
 
 from backend.sim.engine import GameSession  # noqa: E402
+from backend.sim import emotion as _emotion, sns as _sns  # noqa: E402
+from backend.sim.models import (  # noqa: E402
+    Comment as _Comment,
+    Event as _Event,
+    EventImpact as _EventImpact,
+    Post as _Post,
+)
 from backend.sim.models import Asset  # noqa: E402
 
 # ponytail: lazy import — listup is at repo root, imported at runtime only
@@ -128,12 +135,30 @@ class Live:
         self.timeline: list[dict] = []
         self.base: int = 0           # absolute step where the current timeline starts
         self.last_poll_step: int = 0  # highest step the frontend has polled
-        # Start/final snapshots so market + prices ramp across the day animation
-        # (numbers change in sync with the movement, not all at once up front).
+        # content id -> absolute step at which an SNS spectator's post/comment
+        # is revealed, so the crowd's chatter trickles in over the day (not all
+        # at once). Player posts use board_arrival instead.
+        self.reveal: dict[str, int] = {}
+        # The round whose timeline is currently built/playing. The round is
+        # COMPUTED on the event but its animation only starts when the player
+        # confirms "게임 시작" (control_run) -> we build the timeline then.
+        self.built_round: int = 0
+        # Start/final snapshots so the frontend timer can interpolate market +
+        # prices across the day (numbers change in sync with the 2-min replay).
         self.start_market: dict | None = None
         self.final_market: dict | None = None
         self.start_prices: dict = {}
         self.final_prices: dict = {}
+
+        # --- random-walk state (plan: map is decoupled from the board) -------
+        # Agents wander freely & continuously: head to a random destination,
+        # arrive, idle a beat ("free action"), then pick a new one. This is pure
+        # visual life on the map; the board/market is driven by the frontend timer.
+        self._walk_rng = random.Random(seed ^ 0x5EED)
+        self.walk_pos: dict = {p["original"]: p["home"] for p in self.persona}
+        self.walk_path: dict = {p["original"]: [] for p in self.persona}
+        self.walk_idle: dict = {p["original"]: 0 for p in self.persona}
+        self._dest_tiles: list | None = None  # lazy (needs the warmed maze)
 
     @staticmethod
     def _load_homes() -> dict:
@@ -159,6 +184,41 @@ class Live:
             return [(t[0], t[1]) for t in p]
         except Exception:
             return [a, b]
+
+    # -- random wandering (map life, decoupled from the board) -------------- #
+    def _dest_pool(self) -> list:
+        """Candidate destination tiles agents wander between: the real the_ville
+        places (board, exchange, daily-life spots) plus every home, so the map
+        always has lively, purposeful-looking movement."""
+        if self._dest_tiles is None:
+            pool = []
+            for addr in [BOARD_ADDR, EXCHANGE_ADDR] + [a for _, a in DAILY_SPOTS]:
+                t = self._tile_for(addr)
+                if t:
+                    pool.append(t)
+            pool += [p["home"] for p in self.persona if p["home"]]
+            self._dest_tiles = pool or [(62, 70)]
+        return self._dest_tiles
+
+    def _advance_walk(self, orig: str):
+        """Advance one persona by a single tile along its wander path. Returns
+        the persona's new tile. On arrival it idles a few steps (free action),
+        then picks a fresh random destination."""
+        if self.walk_idle.get(orig, 0) > 0:
+            self.walk_idle[orig] -= 1
+            return self.walk_pos[orig]
+        if not self.walk_path.get(orig):
+            dest = self._walk_rng.choice(self._dest_pool())
+            path = self._path(self.walk_pos[orig], dest)
+            self.walk_path[orig] = path[1:] if len(path) > 1 else []
+            if not self.walk_path[orig]:
+                self.walk_idle[orig] = self._walk_rng.randint(3, 10)
+                return self.walk_pos[orig]
+        nxt = self.walk_path[orig].pop(0)
+        self.walk_pos[orig] = nxt
+        if not self.walk_path[orig]:  # arrived -> linger (free action)
+            self.walk_idle[orig] = self._walk_rng.randint(4, 14)
+        return nxt
 
     def build_timeline(self):
         """Choreograph this round's actions into per-agent home->...->home paths."""
@@ -218,6 +278,25 @@ class Live:
             per_agent_frames[p["original"]] = frames
 
         max_len = max((len(f) for f in per_agent_frames.values()), default=1)
+
+        # Schedule this round's SNS-spectator posts/comments to trickle in one by
+        # one across the day (time-ordered reveal), instead of all at once.
+        sns_ids = {a.id for a in self.game.sns_agents}
+        rnd = self.game.round
+        sns_items: list[str] = []
+        for p in self.game.posts:
+            if p.round == rnd and p.agentId in sns_ids:
+                sns_items.append(p.id)
+            for c in p.comments:
+                if getattr(c, "round", rnd) == rnd and c.agentId in sns_ids and c.id:
+                    sns_items.append(c.id)
+        span = max(1, max_len - 1)
+        total = len(sns_items)
+        for i, cid in enumerate(sns_items):
+            # spread evenly in (base, base+span], so the first appears shortly
+            # after the day starts and the last near the end.
+            self.reveal[cid] = self.base + int((i + 1) / (total + 1) * span)
+
         # pad everyone to the same number of steps (idle at home at the end)
         self.timeline = []
         for step in range(max_len):
@@ -282,46 +361,24 @@ class Live:
         return out
 
     def movement_payload(self, step: int) -> dict:
+        """Map life only: every persona takes one wander step. The board/market
+        is NOT driven here anymore — the frontend timer replays the scenario.
+        Always returns a ready movement so the agents wander continuously (even
+        before the first event), and never ends (no timeline to drain)."""
         if step > self.last_poll_step:
             self.last_poll_step = step
-        idx = step - self.base
-        if not self.timeline or idx < 0 or idx >= len(self.timeline):
-            return {"<step>": -1}
-        frame = self.timeline[idx]
-        st = self.game.state()
-        rnd = self.game.round
-        # Ramp market indices + prices from the pre-round snapshot to the final
-        # values across the day animation, so the numbers change in step with the
-        # agents' movement instead of all jumping at once.
-        market = self._progressive_market(idx, st["market"])
-        # Reveal posts progressively: a CURRENT-round agent post only appears once
-        # that agent has ARRIVED at the board in the animation (board_arrival).
-        # Past-round posts and the system 속보 are always shown.
-        visible_posts = []
-        for post in st["posts"]:
-            aid = post.get("agentId")
-            if post.get("round", 0) < rnd or aid == "system" or self.board_arrival.get(aid, 10**9) <= step:
-                visible_posts.append(post)
-        meta = {
-            "curr_time": f"Day {self.game.round}",
-            "round": self.game.round,
-            "market": market,
-            "posts": visible_posts,
-            "events": st["events"],
-            "agents": st["agents"],  # live agents (pre-computed portfolio + live cash/fear/greed/lastAction)
-            "plans": st.get("plans", []),
-            "round_report": st.get("round_report"),
-            "finished": st.get("finished", False),
-        }
-        persona = {
-            orig: {
+        persona = {}
+        for p in self.persona:
+            orig = p["original"]
+            x, y = self._advance_walk(orig)
+            persona[orig] = {
                 "movement": [int(x), int(y)],
                 "pronunciatio": ".",
-                "description": desc,
+                "description": "자유 행동",
                 "chat": None,
             }
-            for orig, (x, y, desc) in frame.items()
-        }
+        # Light meta: just the round (the board state travels via /market/event).
+        meta = {"curr_time": f"Day {self.game.round}", "round": self.game.round}
         return {"<step>": step, "persona": persona, "meta": meta}
 
 
@@ -386,6 +443,20 @@ class RunBody(BaseModel):
     count: int = 0
 
 
+class BoardPostBody(BaseModel):
+    uid: str | None = None
+    text: str
+    target_thread_id: str | None = None       # set -> a comment on that thread
+    mention_agent_id: str | None = None        # set -> that agent must reply now
+
+
+class BoardVoteBody(BaseModel):
+    uid: str | None = None
+    post_id: str
+    comment_id: str | None = None              # set -> vote on a comment, not the post
+    dir: str = "like"                          # "like" | "dislike"
+
+
 # --------------------------------------------------------------------------- #
 # Control endpoints
 # --------------------------------------------------------------------------- #
@@ -397,7 +468,8 @@ def control_status(uid: str | None = None):
                 "running_steps": False, "timeline_len": 0}
     return {"loaded": True, "sim_code": live.sim_code, "uid": uid,
             "round": live.game.round,
-            "running_steps": False, "timeline_len": len(live.timeline)}
+            "running_steps": False, "timeline_len": len(live.timeline),
+            "base": live.base, "last_poll_step": live.last_poll_step}
 
 
 @app.post("/control/start")
@@ -449,10 +521,9 @@ def control_market_event(body: EventBody):
     _st = live.game.state()
     live.final_market = _st["market"]
     live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
-    try:
-        live.build_timeline()
-    except Exception as e:
-        return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
+    # NOTE: the timeline is NOT built here. The round is fully computed, but its
+    # animation must wait until the player presses "게임 시작" -> control_run
+    # builds the timeline then, so nothing moves before the user confirms.
 
     # persist game state to DB
     try:
@@ -462,9 +533,15 @@ def control_market_event(body: EventBody):
         pass  # ponytail: DB save is best-effort, game continues
 
     ev = live.game.events[0] if live.game.events else None
+    # Full round payload so the frontend timer can replay the scenario over ~2
+    # real minutes: state (posts + scenario + agents + emotion_deltas + report)
+    # plus the pre/post-round market snapshots to interpolate prices/indices.
     return {"status": "ok", "round": live.game.round,
             "event": ev.text if ev else body.text,
-            "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
+            "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral",
+            "state": _st,
+            "start_market": live.start_market,
+            "final_market": live.final_market}
 
 
 @app.get("/control/market/state")
@@ -475,6 +552,108 @@ def control_market_state(uid: str | None = None):
     st = live.game.state()
     st["ready"] = True
     return st
+
+
+def _find_post(game, post_id: str):
+    for p in game.posts:
+        if p.id == post_id:
+            return p
+    return None
+
+
+def _find_agent(game, agent_id: str):
+    for a in game.agents + game.sns_agents:
+        if a.id == agent_id:
+            return a
+    return None
+
+
+def _latest_event(game) -> "_Event":
+    if game.events:
+        return game.events[0]
+    return _Event(id="e0", round=game.round, text="", impact=_EventImpact.NEUTRAL)
+
+
+@app.post("/control/board/post")
+def control_board_post(body: BoardPostBody):
+    """D3: the user writes a post or comment. If they @mention an agent, that
+    agent MUST reply immediately and its emotion shifts right away."""
+    live = _get_live(body.uid)
+    if live is None:
+        return {"status": "error", "error": "not started"}
+    game = live.game
+    rnd = max(1, game.round)
+    ts = f"Day{rnd} (나)"
+    mentions = [body.mention_agent_id] if body.mention_agent_id else []
+
+    thread = _find_post(game, body.target_thread_id) if body.target_thread_id else None
+    if thread is not None:
+        # user comment on an existing thread
+        thread.comments.append(_Comment(
+            id=f"c_user_{rnd}_{len(thread.comments)}",
+            agentId="user", agentAlias="나", content=body.text,
+            is_user=True, mentions=mentions, round=rnd,
+        ))
+        reply_thread = thread
+    else:
+        # user opens a new post
+        post = _Post(
+            id=f"p_user_{rnd}_{len(game.posts)}",
+            agentId="user", agentAlias="나", content=body.text,
+            is_user=True, mentions=mentions, timestamp=ts, round=rnd,
+        )
+        game.posts.append(post)
+        reply_thread = post
+
+    # --- mention: the named agent replies now + feels it now ---
+    if body.mention_agent_id:
+        ag = _find_agent(game, body.mention_agent_id)
+        if ag is not None:
+            event = _latest_event(game)
+            write = _sns.decide_write(
+                game.client, ag, event, game.posts, force=True,
+            )
+            text = write.text or f"왜 불러요 {ag.alias}인데"
+            reply_thread.comments.append(_Comment(
+                id=f"c_{ag.id}_{rnd}_{len(reply_thread.comments)}",
+                agentId=ag.id, agentAlias=ag.alias, content=text,
+                mentions=["user"], round=rnd,
+            ))
+            # immediate emotion change from being addressed by the user
+            delta = _emotion.generate_emotion_delta_from_text(
+                game.client, ag, body.text, kind="mention",
+            )
+            _emotion.apply_emotion_delta(ag, delta)
+
+    return {
+        "status": "ok",
+        "posts": [p.model_dump() for p in game.posts],
+        "agents": [a.model_dump() for a in game.agents],
+        "sns_agents": [a.model_dump() for a in game.sns_agents],
+        "emotion_deltas": game._emotion_deltas(),
+    }
+
+
+@app.post("/control/board/vote")
+def control_board_vote(body: BoardVoteBody):
+    """D4: like/dislike a post or comment. Counts settle into the author's
+    confidence at the start of the next round."""
+    live = _get_live(body.uid)
+    if live is None:
+        return {"status": "error", "error": "not started"}
+    post = _find_post(live.game, body.post_id)
+    if post is None:
+        return {"status": "error", "error": "post not found"}
+    target = post
+    if body.comment_id:
+        target = next((c for c in post.comments if c.id == body.comment_id), None)
+        if target is None:
+            return {"status": "error", "error": "comment not found"}
+    if body.dir == "dislike":
+        target.dislikes += 1
+    else:
+        target.likes += 1
+    return {"status": "ok", "posts": [p.model_dump() for p in live.game.posts]}
 
 
 @app.get("/control/report/overall")
@@ -489,7 +668,19 @@ def control_report_overall(uid: str | None = None):
 
 @app.post("/control/run")
 def control_run(body: RunBody):
-    return {"status": "ok", "count": body.count}
+    """The "게임 시작" gate (D1): build the computed round's timeline NOW so the
+    day animation starts only after the player confirms — not on event submit."""
+    live = _get_live(body.uid)
+    if live is None:
+        return {"status": "error", "error": "not started"}
+    # Build once per round (a re-press must not rewind/rebuild with a later base).
+    if live.built_round != live.game.round and live.game.round > 0:
+        try:
+            live.build_timeline()
+            live.built_round = live.game.round
+        except Exception as e:
+            return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
+    return {"status": "ok", "count": body.count, "round": live.game.round}
 
 
 @app.get("/control/sessions")

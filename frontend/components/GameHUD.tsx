@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  Fish,
+  Clock,
   BarChart3,
   MessageSquare,
   Send,
@@ -15,6 +15,10 @@ import {
 
 interface Props {
   round: number;
+  /** In-game clock label "HH:MM" (00:00 → 24:00) shown in the logo slot. */
+  clock: string;
+  /** True while the day is replaying (clock advancing). */
+  playing?: boolean;
   onEvent: (text: string) => void;
   marketOpen: boolean;
   boardOpen: boolean;
@@ -40,6 +44,8 @@ function Badge({ count }: { count: number }) {
 
 export default function GameHUD({
   round,
+  clock,
+  playing = false,
   onEvent,
   marketOpen,
   boardOpen,
@@ -64,12 +70,18 @@ export default function GameHUD({
 
   return (
     <>
-      {/* ── Top-left: Logo ── */}
+      {/* ── Top-left: in-game day clock (00:00 → 24:00) + round ── */}
       <div className="absolute top-4 left-4 z-40">
-        <div className="flex items-center gap-2 bg-white border-2 border-black rounded-xl px-3 py-2 shadow-pixel-sm">
-          <Fish size={18} className="text-pixel-greenText" />
-          <span className="text-sm font-bold text-black tracking-wide pixel-title">
-            MARKET AQUARIUM
+        <div className="flex items-center gap-2.5 bg-white border-2 border-black rounded-xl px-3 py-2 shadow-pixel-sm">
+          <Clock
+            size={18}
+            className={`text-pixel-greenText ${playing ? "animate-pulse-soft" : ""}`}
+          />
+          <span className="text-lg font-extrabold text-black tracking-wider tabular-nums leading-none pixel-title">
+            {clock}
+          </span>
+          <span className="text-[10px] font-bold text-pixel-muted leading-none">
+            DAY {round}
           </span>
         </div>
       </div>

@@ -14,6 +14,7 @@ still runs end-to-end offline.
 
 from __future__ import annotations
 
+import random
 from concurrent.futures import ThreadPoolExecutor
 
 from . import credibility, emotion, market_state, price_engine, report, sns, trade
@@ -30,7 +31,7 @@ from .models import (
     Post,
     RoundReport,
 )
-from .personas import sample_agents
+from .personas import sample_agents, sample_sns_agents
 
 MAX_ROUNDS = 5
 
@@ -103,11 +104,22 @@ class GameSession:
         self.sectors = load_sectors()
         prices = {a.symbol: a.price for a in self.assets}
         self.agents: list[Agent] = sample_agents(num_agents, seed=seed, prices=prices)
+        # SNS-only spectators (D2): board-only crowd, as many as the players.
+        self.sns_agents: list[Agent] = sample_sns_agents(num_agents)
         self.posts: list[Post] = []
         self.events: list[Event] = []
         self.round: int = 0
         self.round_reports: list[RoundReport] = []
         self.last_round_actions: list[dict] = []
+        # Plan §2: the current round's time-ordered action schedule (post/comment/
+        # like/dislike, each with a minute t in [0,1440]) the frontend timer
+        # replays over ~2 real minutes. Rebuilt every run_round.
+        self.scenario: dict | None = None
+        # Emotion snapshot at the start of the current round, for the 감정 탭 delta.
+        self.emotion_prev: dict[str, dict] = {}
+        # Net (like-dislike) already applied to confidence per post/comment id, so
+        # repeated settlements only apply the *new* votes (incl. user votes).
+        self._vote_settled: dict[str, int] = {}
         self.market: MarketData = market_state.compute_market_data(self.agents, self.assets)
         # snapshot for end-of-game achievements (best performer)
         self._initial_state = {
@@ -118,6 +130,61 @@ class GameSession:
     def _net_worth(self, agent: Agent) -> float:
         held = sum(h.amount * h.avgPrice for h in agent.portfolio)
         return agent.cash + held
+
+    _EMO_AXES = ("fear", "greed", "confidence", "excitement", "trust")
+
+    def _all_agents(self) -> list[Agent]:
+        """Players + SNS spectators (board/emotion phases touch both)."""
+        return self.agents + self.sns_agents
+
+    def _emo_snapshot(self, agent: Agent) -> dict:
+        return {axis: getattr(agent, axis) for axis in self._EMO_AXES}
+
+    def _settle_votes(self) -> None:
+        """D3: turn accumulated (like − dislike) on each agent's own posts and
+        comments into a confidence shift. Only the *new* votes since the last
+        settlement are applied, so interactive user votes count exactly once."""
+        by_agent: dict[str, int] = {}
+        agent_by_id = {a.id: a for a in self._all_agents()}
+        for post in self.posts:
+            items = [(post.id, post.agentId, post.likes - post.dislikes)]
+            items += [(c.id, c.agentId, c.likes - c.dislikes) for c in post.comments if c.id]
+            for cid, aid, net in items:
+                d = net - self._vote_settled.get(cid, 0)
+                if d:
+                    by_agent[aid] = by_agent.get(aid, 0) + d
+                    self._vote_settled[cid] = net
+        for aid, net in by_agent.items():
+            ag = agent_by_id.get(aid)
+            if ag is not None:
+                emotion.apply_vote_emotion(ag, net)
+
+    def _cast_sns_votes(self, rnd: int) -> list[dict]:
+        """D2/D4: every SNS spectator likes a post (and sometimes dislikes one)
+        this round, so net votes accumulate and feed confidence next round.
+
+        Returns the ordered vote events ({post_id, comment_id, dir}) so the
+        scenario builder can trickle each like/dislike in over the timer; the
+        final counts are applied here so settlement/emotion stay unchanged.
+        """
+        events: list[dict] = []
+        round_posts = [p for p in self.posts if p.round == rnd]
+        if not round_posts:
+            return events
+        for ag in self.sns_agents:
+            rng = random.Random((hash(ag.id) & 0xFFFFFFFF) ^ (self.seed + rnd * 7919))
+            targets = [p for p in round_posts if p.agentId != ag.id] or round_posts
+            like_p = rng.choice(targets)
+            like_p.likes += 1
+            events.append({"post_id": like_p.id, "comment_id": None, "dir": "like"})
+            others = [p for p in targets if p.id != like_p.id]
+            # provocative / fearful spectators are quicker to dislike
+            dislike_bias = 0.6 if ag.type in ("conspiracy", "panic_seller", "contrarian") else 0.3
+            if others and rng.random() < dislike_bias:
+                dp = rng.choice(others)
+                dp.dislikes += 1
+                events.append({"post_id": dp.id, "comment_id": None, "dir": "dislike"})
+        return events
 
     @property
     def finished(self) -> bool:
@@ -136,6 +203,10 @@ class GameSession:
         """Advance one round given the user's single event (FR-1 .. FR-8)."""
         if self.finished:
             raise RuntimeError("simulation already finished (5 rounds)")
+        # Snapshot every axis BEFORE this round's changes so the 감정 탭 can show
+        # the per-round delta, then settle last round's votes into confidence.
+        self.emotion_prev = {a.id: self._emo_snapshot(a) for a in self._all_agents()}
+        self._settle_votes()
         self.round += 1
         rnd = self.round
         ts = timestamp or f"Day{rnd} 09:00"
@@ -152,8 +223,8 @@ class GameSession:
         )
         self.events.insert(0, event)
 
-        # News bot broadcasts the headline as the seed post of the round.
-        self._broadcast_event_post(event, ts)
+        # The event is shown ONLY as the single NEWS card in the UI (D: no extra
+        # system 속보 post in the feed). Agents open their own threads instead.
 
         # --- FR-2b / FR-2: credibility-gated emotion change from the event ---
         # Per-agent and independent -> run the LLM calls concurrently (these are
@@ -166,24 +237,45 @@ class GameSession:
                 return None  # skeptical persona ignores a low-trust rumor (FR-4 spirit)
             return emotion.generate_emotion_delta(self.client, ag, event)
 
+        # Players AND SNS spectators react emotionally to the event (D3: all axes
+        # move for everyone shown in the 감정 탭).
+        emo_targets = self._all_agents()
         with ThreadPoolExecutor(max_workers=8) as _ex:
-            _deltas = list(_ex.map(_emotion_delta, self.agents))
-        for ag, d in zip(self.agents, _deltas):
+            _deltas = list(_ex.map(_emotion_delta, emo_targets))
+        for ag, d in zip(emo_targets, _deltas):
             if d is not None:
                 emotion.apply_emotion_delta(ag, d)
 
-        # --- FR-3: each agent visits the board, reads the feed, writes once ---
-        # Posts are grounded in each agent's interested assets/sectors (their holdings).
+        # --- FR-3 / D2: each agent visits the board and writes once. Players are
+        # grounded in their holdings; SNS spectators are forced to speak. ---
+        # Board spread: aim for ~half the writers to open a thread and ~half to
+        # comment. The floor avoids one giant pile-on; the cap guarantees real
+        # discussion instead of N isolated posts.
+        total_writers = len(self.agents) + len(self.sns_agents)
+        min_threads = max(3, total_writers // 4)
+        max_threads = max(min_threads + 1, total_writers // 2)
         sym2sector = {a.symbol: a.sector for a in self.assets}
-        for ag in self.agents:
+        # Plan §2: the round's first two agents may ONLY post (post_only), so the
+        # board always opens with real threads to comment on / vote for.
+        for i, ag in enumerate(self.agents):
             ag.location = Location.COMMUNITY
             interests = [h.asset for h in ag.portfolio if h.amount > 0][:4]
             sectors = list(dict.fromkeys(s for s in (sym2sector.get(x, "") for x in interests) if s))
             result = sns.view_sns(
                 self.client, ag, event, self.posts, rnd, timestamp=ts,
-                interests=interests, sectors=sectors,
+                interests=interests, sectors=sectors, post_only=(i < 2),
+                min_round_threads=min_threads, max_round_threads=max_threads,
             )
             sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
+        for ag in self.sns_agents:
+            result = sns.view_sns(
+                self.client, ag, event, self.posts, rnd, timestamp=ts, force=True,
+                min_round_threads=min_threads, max_round_threads=max_threads,
+            )
+            sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
+
+        # SNS spectators cast their like/dislike votes on this round's posts.
+        vote_events = self._cast_sns_votes(rnd)
 
         # --- contagion: reading others' posts nudges fear/greed (FR-3 spirit) ---
         self._apply_contagion(rnd)
@@ -236,7 +328,54 @@ class GameSession:
                 "trade_symbol": tr.symbol if tr else None,
                 "traded": bool(tr and tr.action.value != "HOLD"),
             })
+
+        # Plan §2: time-ordered action schedule the frontend timer replays.
+        self.scenario = self._build_scenario(rnd, vote_events)
         return rr
+
+    # ------------------------------------------------------------------ #
+    def _build_scenario(self, rnd: int, vote_events: list[dict]) -> dict:
+        """Order this round's posts → comments → votes into a timed action list
+        (minute t in [0,1440]). The first two agents' posts lead (earliest t);
+        every comment/vote is placed AFTER the item it references appears, so the
+        timer never reveals a reply before its thread."""
+        round_posts = [p for p in self.posts if p.round == rnd]
+        openers = [a.id for a in self.agents[:2]]
+
+        def _rank(p):
+            return (openers.index(p.agentId) if p.agentId in openers
+                    else len(openers) + round_posts.index(p))
+
+        ordered_posts = sorted(round_posts, key=_rank)
+
+        actions: list[dict] = []
+        appear: dict[str, int] = {}  # post/comment id -> minute it shows up
+
+        n = len(ordered_posts)
+        for i, p in enumerate(ordered_posts):
+            t = int(30 + (i + 1) / (n + 1) * 540)          # posts: 30..570
+            appear[p.id] = t
+            actions.append({"t": t, "kind": "post", "post_id": p.id, "comment_id": None})
+
+        comments = [(p, c) for p in self.posts for c in p.comments
+                    if getattr(c, "round", rnd) == rnd and c.id]
+        nc = len(comments)
+        for i, (p, c) in enumerate(comments):
+            base = int(400 + (i + 1) / (nc + 1) * 900)      # comments: 400..1300
+            t = min(1440, max(base, appear.get(p.id, 0) + 20))
+            appear[c.id] = t
+            actions.append({"t": t, "kind": "comment", "post_id": p.id, "comment_id": c.id})
+
+        nv = len(vote_events)
+        for i, ve in enumerate(vote_events):
+            base = int(500 + (i + 1) / (nv + 1) * 940)      # votes: 500..1440
+            ref = appear.get(ve["comment_id"] or ve["post_id"], 0)
+            t = min(1440, max(base, ref + 10))
+            actions.append({"t": t, "kind": ve["dir"],
+                            "post_id": ve["post_id"], "comment_id": ve["comment_id"]})
+
+        actions.sort(key=lambda a: a["t"])
+        return {"round": rnd, "duration_min": 1440, "actions": actions}
 
     # ------------------------------------------------------------------ #
     def _broadcast_event_post(self, event: Event, ts: str) -> None:
@@ -270,9 +409,10 @@ class GameSession:
             top = max(others, key=lambda p: p.likes + len(p.comments))
             return emotion.generate_emotion_delta_from_text(self.client, ag, top.content)
 
+        targets = self._all_agents()
         with ThreadPoolExecutor(max_workers=8) as ex:
-            deltas = list(ex.map(_delta, self.agents))
-        for ag, d in zip(self.agents, deltas):
+            deltas = list(ex.map(_delta, targets))
+        for ag, d in zip(targets, deltas):
             if d is not None:
                 emotion.apply_emotion_delta(ag, d)
 
@@ -282,6 +422,18 @@ class GameSession:
         achievements = report.award_achievements(self.agents, self._initial_state, prices)
         return report.build_overall_report(self.round_reports, self.agents, achievements)
 
+    def _emotion_deltas(self) -> dict[str, dict]:
+        """Per-agent change of each axis vs the start of the current round."""
+        out: dict[str, dict] = {}
+        for a in self._all_agents():
+            prev = self.emotion_prev.get(a.id)
+            cur = self._emo_snapshot(a)
+            if prev is None:
+                out[a.id] = {axis: 0.0 for axis in self._EMO_AXES}
+            else:
+                out[a.id] = {axis: round(cur[axis] - prev[axis], 1) for axis in self._EMO_AXES}
+        return out
+
     def state(self) -> dict:
         """FE-facing snapshot (shapes mirror frontend mock_data types)."""
         return {
@@ -289,6 +441,9 @@ class GameSession:
             "max_rounds": MAX_ROUNDS,
             "finished": self.finished,
             "agents": [a.model_dump() for a in self.agents],
+            # SNS-only spectators (D2): board avatars, never on the map.
+            "sns_agents": [a.model_dump() for a in self.sns_agents],
+            "emotion_deltas": self._emotion_deltas(),
             "market": self.market.model_dump(),
             "posts": [p.model_dump() for p in self.posts],
             "events": [e.model_dump() for e in self.events],
@@ -300,4 +455,6 @@ class GameSession:
             ],
             # FR-10: the real latest round report (replaces the frontend mock).
             "round_report": self.round_reports[-1].model_dump() if self.round_reports else None,
+            # Plan §2: the current round's timer schedule (post/comment/vote @ t).
+            "scenario": self.scenario,
         }
