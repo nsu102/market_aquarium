@@ -14,8 +14,12 @@ still runs end-to-end offline.
 
 from __future__ import annotations
 
+import logging
 import random
+import time
 from concurrent.futures import ThreadPoolExecutor
+
+_log = logging.getLogger("engine.perf")
 
 from . import credibility, emotion, market_state, price_engine, report, sentiment, sns, trade
 from .assets import assets_by_symbol, load_assets, load_sectors
@@ -220,7 +224,9 @@ class GameSession:
         self.round += 1
         rnd = self.round
         ts = timestamp or f"Day{rnd} 09:00"
+        _t0 = time.monotonic()
         impact = impact or classify_impact(text)
+        _log.info("classify_impact: %.2fs", time.monotonic() - _t0)
         event = Event(
             id=f"e{rnd}",
             round=rnd,
@@ -237,24 +243,27 @@ class GameSession:
         # system 속보 post in the feed). Agents open their own threads instead.
 
         # --- FR-2b / FR-2: credibility-gated emotion change from the event ---
-        # Per-agent and independent -> run the LLM calls concurrently (these are
-        # I/O-bound), then apply the deltas sequentially. ~6x faster than serial.
+        # Credibility LLM call only matters for rumors; skip it for normal events
+        # to save 12 LLM calls (~4s).
         def _emotion_delta(ag):
-            cred = credibility.generate_news_credibility(
-                self.client, ag, text, source=cred_source, is_rumor=is_rumor
-            )
-            if is_rumor and not credibility.is_credible(cred):
-                return None  # skeptical persona ignores a low-trust rumor (FR-4 spirit)
+            if is_rumor:
+                cred = credibility.generate_news_credibility(
+                    self.client, ag, text, source=cred_source, is_rumor=True
+                )
+                if not credibility.is_credible(cred):
+                    return None
             return emotion.generate_emotion_delta(self.client, ag, event)
 
         # Players AND SNS spectators react emotionally to the event (D3: all axes
         # move for everyone shown in the 감정 탭).
         emo_targets = self._all_agents()
+        _t1 = time.monotonic()
         with ThreadPoolExecutor(max_workers=8) as _ex:
             _deltas = list(_ex.map(_emotion_delta, emo_targets))
         for ag, d in zip(emo_targets, _deltas):
             if d is not None:
                 emotion.apply_emotion_delta(ag, d)
+        _log.info("emotion_delta (%d agents): %.2fs", len(emo_targets), time.monotonic() - _t1)
 
         # --- FR-3 / D2: each agent visits the board and writes once. Players are
         # grounded in their holdings; SNS spectators are forced to speak. ---
@@ -276,6 +285,7 @@ class GameSession:
             return interests, sectors
 
         # Phase 1: first 2 agents seed threads (parallel)
+        _t2 = time.monotonic()
         openers = self.agents[:2]
         def _open(ag):
             interests, sectors = _agent_interests(ag)
@@ -307,21 +317,24 @@ class GameSession:
             futs_sns = list(ex.map(_write_sns, self.sns_agents))
         for ag, result in futs_agents + futs_sns:
             sns.apply_sns_write(result.write, ag, self.posts, rnd, timestamp=ts)
+        _log.info("sns_write (%d total): %.2fs", total_writers, time.monotonic() - _t2)
 
         # SNS spectators cast their like/dislike votes on this round's posts.
         vote_events = self._cast_sns_votes(rnd)
 
-        # --- contagion: reading others' posts nudges fear/greed (FR-3 spirit) ---
-        self._apply_contagion(rnd)
-
-        # --- FR-5: trades at the exchange (after SNS) ---
-        # The action is decided by the LLM ("행동 결정까지 LLM"), true to each
-        # persona's type + fear/greed + the event; it falls back to the
-        # deterministic rule per-agent on any LLM failure so a trade always
-        # resolves and the offline/mocked paths stay reproducible.
+        # --- contagion + trades run in parallel (independent) ---
+        _t3 = time.monotonic()
         abs_ = assets_by_symbol(self.assets)
         market_pre = market_state.compute_market_data(self.agents, self.assets)
-        trades = trade.run_trades_llm(self.client, self.agents, abs_, market_pre, event)
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fut_contagion = ex.submit(self._apply_contagion, rnd)
+            fut_trades = ex.submit(
+                trade.run_trades_llm, self.client, self.agents, abs_, market_pre, event
+            )
+            fut_contagion.result()
+            trades = fut_trades.result()
+        _log.info("contagion+trades (parallel): %.2fs", time.monotonic() - _t3)
         for ag in self.agents:
             ag.location = Location.EXCHANGE
             ag.bubble = _ACTION_BUBBLE.get(ag.lastAction, "")
@@ -345,6 +358,7 @@ class GameSession:
             self.agents, self.assets, trades, posts_count=len([p for p in self.posts if p.round == rnd])
         )
         rr = report.build_round_report(rnd, self.market, breakdowns, self.agents, trades, self._emotion_deltas())
+        _log.info("ROUND %d TOTAL: %.2fs", rnd, time.monotonic() - _t0)
         self.round_reports.append(rr)
 
         # Per-agent round summary so the frontend can choreograph movement:
