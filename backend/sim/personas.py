@@ -17,19 +17,30 @@ from pathlib import Path
 from .assets import assets_by_symbol, load_assets
 from .models import Action, Agent, AgentType, Location, Persona, PortfolioHolding, Position
 
-# Pre-computed allocations (cash% + per-asset%) baked in JSON — deterministic,
-# never user-selected (per product decision). See portfolio_allocations.json.
+# Pre-computed allocations: try MongoDB first, fallback to JSON file.
 _ALLOC_PATH = Path(__file__).resolve().parent / "portfolio_allocations.json"
-try:
-    _ALLOCATIONS: dict = {
-        k: v for k, v in json.loads(_ALLOC_PATH.read_text(encoding="utf-8")).items()
-        if not k.startswith("_")
-    }
-except Exception:
-    _ALLOCATIONS = {}
+
+
+def _load_allocations() -> dict:
+    from backend.db import _db
+    docs = list(_db().allocations.find())
+    if not docs:
+        raise RuntimeError("allocations not found in MongoDB — run: python -m backend.seed")
+    return {d["_id"]: {k: v for k, v in d.items() if k != "_id"} for d in docs}
+
+
+_ALLOCATIONS: dict = _load_allocations()
+
+def _load_personas_from_db() -> list[Persona]:
+    from backend.db import _db
+    docs = list(_db().personas.find())
+    if not docs:
+        raise RuntimeError("personas not found in MongoDB — run: python -m backend.seed")
+    return [Persona(**{k: v for k, v in d.items() if k != "_id"}) for d in docs]
+
 
 # Default starting cash candidate pools (KRW), aligned with FE defaultCash.
-PERSONA_POOL: list[Persona] = [
+_HARDCODED_POOL: list[Persona] = [
     Persona(
         persona_id="panic",
         alias="패닉셀 개미",
@@ -176,6 +187,8 @@ PERSONA_POOL: list[Persona] = [
         rumor_sensitivity=0.95,
     ),
 ]
+
+PERSONA_POOL: list[Persona] = _load_personas_from_db()
 
 # The MVP default 6 (PRD §0 #9) -- matches the frontend's 6 default profiles.
 DEFAULT_PERSONA_IDS = ["panic", "fomo", "value", "quant", "whale", "contrarian"]

@@ -367,6 +367,11 @@ class StartBody(BaseModel):
     seed: int | None = None  # optional user-specified seed
 
 
+class ResumeBody(BaseModel):
+    uid: str
+    sim_code: str | None = None
+
+
 class EventBody(BaseModel):
     uid: str | None = None
     text: str
@@ -406,13 +411,14 @@ def control_start(body: StartBody):
 
     _maze()  # warm the maze once
 
-    # 1. Fetch fresh assets from Upbit, fallback to existing default_assets.json
+    # 1. Fetch fresh assets from Upbit
     artifact = _fetch_assets_from_upbit()
     if artifact is None:
-        # fallback: load from disk
-        default_path = os.path.join(_REPO, "default_assets.json")
-        with open(default_path, encoding="utf-8") as f:
-            artifact = json.load(f)
+        # Upbit API 실패 시 DB의 default_assets 사용
+        doc = db.get_default_assets_base()
+        if not doc:
+            return {"status": "error", "error": "Upbit API 실패 + DB에 default_assets 없음 — python -m backend.seed 실행 필요"}
+        artifact = doc
 
     # 2. Determine seed
     seed = body.seed if body.seed is not None else int.from_bytes(os.urandom(4), "big")
@@ -428,6 +434,41 @@ def control_start(body: StartBody):
     _SESSIONS[uid] = live
 
     return {"status": "started", "sim_code": live.sim_code, "uid": uid, "seed": seed, "step": 0}
+
+
+@app.post("/control/resume")
+def control_resume(body: ResumeBody):
+    """Resume a previously saved session from MongoDB."""
+    from backend import db
+
+    session = db.get_session(body.uid)
+    if not session:
+        return {"status": "error", "error": "session not found"}
+
+    game_state = session.get("game_state")
+    if not game_state:
+        return {"status": "error", "error": "no saved game_state for this session"}
+
+    _maze()
+    artifact = session["default_assets"]
+    seed = session["seed"]
+    assets = load_assets_from_artifact(artifact)
+
+    sim_code = body.sim_code or f"resume_{body.uid[:8]}"
+    live = Live(sim_code, assets=assets, seed=seed)
+    # Restore engine state from DB
+    live.game = GameSession.restore(game_state, assets=assets, seed=seed)
+    _SESSIONS[body.uid] = live
+
+    return {
+        "status": "resumed",
+        "sim_code": sim_code,
+        "uid": body.uid,
+        "seed": seed,
+        "round": live.game.round,
+        "finished": live.game.finished,
+        "step": 0,
+    }
 
 
 @app.post("/control/market/event")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import { Agent } from "@/mock_data/agents";
 import { Asset } from "@/mock_data/market";
@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { filterNumeric, filterInt, formatKRW } from "@/utils/numberInput";
 import PixelButton from "@/components/pixel/PixelButton";
+import { loadSessionUid } from "@/lib/control";
 
 /* ── Types ── */
 
@@ -49,6 +50,7 @@ interface SetupAgent {
 
 interface Props {
   onStart: (agents: Agent[], assets: Asset[]) => void;
+  onResume?: () => void;
 }
 
 /* ── Helpers ── */
@@ -65,10 +67,15 @@ function buildDefault(): SetupAgent[] {
 
 /* ── Component ── */
 
-export default function SetupScreen({ onStart }: Props) {
+export default function SetupScreen({ onStart, onResume }: Props) {
   const [agents, setAgents] = useState<SetupAgent[]>(buildDefault);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [editingAsset, setEditingAsset] = useState<string | null>(null);
+  const [hasSavedSession, setHasSavedSession] = useState(false);
+
+  useEffect(() => {
+    setHasSavedSession(!!loadSessionUid());
+  }, []);
 
   const selected = agents[selectedIdx];
   const enabledAgents = agents.filter((a) => a.enabled);
@@ -397,6 +404,11 @@ export default function SetupScreen({ onStart }: Props) {
           <PixelButton variant="ghost" size="sm" onClick={randomize}><Shuffle size={11} />랜덤</PixelButton>
           <PixelButton variant="ghost" size="sm" onClick={reset}><RotateCcw size={11} />초기화</PixelButton>
           <div className="flex-1" />
+          {onResume && hasSavedSession && (
+            <PixelButton variant="ghost" size="md" onClick={onResume}>
+              <RotateCcw size={12} />이어하기
+            </PixelButton>
+          )}
           <PixelButton variant="primary" size="md" onClick={handleStart} disabled={enabledAgents.length < 2}>
             시작<Play size={12} />
           </PixelButton>

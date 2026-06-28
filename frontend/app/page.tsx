@@ -119,7 +119,10 @@ export default function Home() {
         .start(FORK_SIM_CODE, sim)
         .then((res) => {
           setCanonicalSim(sim);
-          if (res.uid) setSessionUid(res.uid);
+          if (res.uid) {
+            setSessionUid(res.uid);
+            control.saveSessionUid(res.uid);
+          }
         })
         .catch((err) => {
           console.warn("[MarketAquarium] canonical start failed:", err);
@@ -127,6 +130,45 @@ export default function Home() {
     },
     [seedFromSetup]
   );
+
+  const handleResume = useCallback(() => {
+    const savedUid = control.loadSessionUid();
+    if (!savedUid) return;
+    setGameStarted(true);
+    setRoundReport(null);
+    setOverall(null);
+    overallFetchedRef.current = false;
+
+    const sim = `resume_${Date.now()}`;
+    control
+      .resume(savedUid, sim)
+      .then((res) => {
+        if (res.status === "error") {
+          console.warn("[MarketAquarium] resume failed:", res.error);
+          control.clearSessionUid();
+          setGameStarted(false);
+          return;
+        }
+        setCanonicalSim(sim);
+        setSessionUid(savedUid);
+        if (typeof res.round === "number") setCurrentRound(res.round);
+        // Fetch full state so panels populate immediately
+        control.marketState(savedUid).then((st) => {
+          if (st.ready) {
+            if (st.market) setMarketData(st.market);
+            if (st.posts) setPosts(st.posts);
+            if (st.events) setEvents(st.events);
+            if (st.agents?.length) setAgents(st.agents);
+            if (typeof st.round === "number") setCurrentRound(st.round);
+          }
+        }).catch(() => {});
+      })
+      .catch((err) => {
+        console.warn("[MarketAquarium] resume failed:", err);
+        control.clearSessionUid();
+        setGameStarted(false);
+      });
+  }, []);
 
   /** Canonical movement-update tick: drive panels from meta.market/posts/round. */
   const handleTick = useCallback((meta: ReverieMeta) => {
@@ -201,7 +243,7 @@ export default function Home() {
   );
 
   if (!gameStarted) {
-    return <SetupScreen onStart={handleStart} />;
+    return <SetupScreen onStart={handleStart} onResume={handleResume} />;
   }
 
   // Round report: the real backend report (with price-breakdown infographic)

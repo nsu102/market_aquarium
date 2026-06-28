@@ -183,6 +183,40 @@ export interface OverallReportResponse {
   };
 }
 
+/* ── Session persistence (localStorage) ── */
+
+const SESSION_KEY = "market_aquarium_uid";
+
+export function saveSessionUid(uid: string): void {
+  if (typeof window !== "undefined") localStorage.setItem(SESSION_KEY, uid);
+}
+
+export function loadSessionUid(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(SESSION_KEY);
+}
+
+export function clearSessionUid(): void {
+  if (typeof window !== "undefined") localStorage.removeItem(SESSION_KEY);
+}
+
+/* ── Resume ── */
+
+export interface ResumeResponse {
+  status: string;
+  sim_code?: string;
+  uid?: string;
+  seed?: number;
+  round?: number;
+  finished?: boolean;
+  step?: number;
+  error?: string;
+}
+
+export function resume(uid: string, sim_code?: string): Promise<ResumeResponse> {
+  return postJson<ResumeResponse>("/control/resume", { uid, sim_code });
+}
+
 /** Overall end-of-game report + achievements (FR-9/FR-10), shown when 5 rounds finish. */
 export function overallReport(uid?: string): Promise<OverallReportResponse> {
   const q = uid ? `?uid=${uid}` : "";

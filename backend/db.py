@@ -55,6 +55,14 @@ def get_default_assets(uid: str) -> dict | None:
     return doc["default_assets"] if doc else None
 
 
+def get_default_assets_base() -> dict | None:
+    """Get the seeded default_assets (not per-session, the base one)."""
+    doc = _db().default_assets.find_one({"_id": "current"})
+    if doc:
+        doc.pop("_id", None)
+    return doc
+
+
 def list_sessions(limit: int = 20) -> list[dict]:
     return list(
         _db().sessions.find({}, {"default_assets": 0, "game_state": 0})
