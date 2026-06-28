@@ -4,12 +4,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Trophy, Activity, ScrollText } from "lucide-react";
 import PixelModal from "@/components/pixel/PixelModal";
-import type { OverallAchievement } from "@/lib/control";
+import BranchMap from "@/components/BranchMap";
+import type { OverallAchievement, EndingResult } from "@/lib/control";
 import type { Agent } from "@/mock_data/agents";
 import type { LogEntry } from "@/components/ActivityLog";
 
 interface Props {
-  report: { markdown: string; achievements: OverallAchievement[] };
+  report: { markdown: string; achievements: OverallAchievement[]; endings?: EndingResult[] };
   agents?: Agent[];
   activityLog?: LogEntry[];
   onClose: () => void;
@@ -57,6 +58,11 @@ export default function OverallReport({
             </div>
           ))}
         </div>
+      )}
+
+      {/* FR-Branch: protagonist endings */}
+      {report.endings && report.endings.length > 0 && (
+        <BranchMap endings={report.endings} />
       )}
 
       {/* Agent Performance Ranking */}

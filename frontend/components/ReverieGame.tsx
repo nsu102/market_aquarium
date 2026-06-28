@@ -336,7 +336,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
           .sprite(startPos[0], startPos[1], name, "down")
           .setSize(30, 40)
           .setOffset(0, 32)
-          .setScale(3);
+          .setScale(2);
         // Click a character to open its detail (portfolio composition, etc.).
         sprite.setInteractive({ useHandCursor: true });
         sprite.on("pointerdown", () => onSelectRef.current?.(p.original));

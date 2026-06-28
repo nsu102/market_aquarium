@@ -171,6 +171,9 @@ class Live:
         self.final_market: dict | None = None
         self.start_prices: dict = {}
         self.final_prices: dict = {}
+        # FR-Branch: card cascade state
+        self.last_card_id: str | None = None
+        self.chosen_cards: list[str] = []
 
         # --- random-walk state (plan: map is decoupled from the board) -------
         # Agents wander freely & continuously: head to a random destination,
@@ -546,6 +549,9 @@ class EventBody(BaseModel):
     text: str
     is_rumor: bool = False
     source: str = "user"
+    card_id: str | None = None
+    impact: str | None = None
+    base_shock: float | None = None
 
 
 class StepBody(BaseModel):
@@ -681,8 +687,12 @@ def control_market_event(body: EventBody):
                 "error": "5 라운드 종료 — 재시작하세요"}
     live.start_market = live.game.market.model_dump()
     live.start_prices = {a.symbol: a.price for a in live.game.assets}
+    impact = _EventImpact(body.impact) if body.impact in ("positive", "negative", "neutral") else None
     try:
-        live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
+        live.game.run_round(
+            body.text, impact=impact, source=body.source,
+            is_rumor=body.is_rumor, base_shock=body.base_shock,
+        )
     except RuntimeError as e:
         return {"status": "finished", "round": live.game.round, "error": str(e)}
     except Exception as e:
@@ -702,10 +712,14 @@ def control_market_event(body: EventBody):
     except Exception as e:
         print(f"[WARN] save_game_state failed: {e}")
 
+    if body.card_id:
+        live.last_card_id = body.card_id
+        live.chosen_cards.append(body.card_id)
     ev = live.game.events[0] if live.game.events else None
     return {"status": "ok", "round": live.game.round,
             "event": ev.text if ev else body.text,
             "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
+
 
 
 @app.get("/control/market/state")

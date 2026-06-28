@@ -94,6 +94,20 @@ export interface MarketEventInput {
   uid?: string;
   text: string;
   is_rumor?: boolean;
+  card_id?: string;
+  impact?: string;
+  base_shock?: number;
+}
+
+export interface EndingResult {
+  agent_id: string;
+  agent_alias: string;
+  agent_type: string;
+  ending_id: string;
+  title: string;
+  description: string;
+  ghost_text: string;
+  persona_mutation: Record<string, unknown>;
 }
 
 /* ── Core request helper ── */

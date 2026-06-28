@@ -268,16 +268,19 @@ export default function Home() {
     }
   }, [sessionUid, pushLog]);
 
-  const handleEvent = useCallback((text: string) => {
+  const handleEvent = useCallback((input: string | control.MarketEventInput) => {
     if (gameFinished) return;
+    const ev: control.MarketEventInput = typeof input === "string"
+      ? { text: input, is_rumor: false }
+      : input;
     setNeedEvent(false);
     setComputing(true);
-    pushLog(`이벤트 발생: ${text}`);
+    pushLog(`이벤트 발생: ${ev.text}`);
     control
-      .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
+      .marketEvent({ uid: sessionUid ?? undefined, ...ev })
       .then((res) => {
         setActiveEvent({
-          text,
+          text: ev.text,
           impact: normalizeImpact(res.impact),
           source: "user",
         });
@@ -295,7 +298,7 @@ export default function Home() {
       })
       .catch((err) => {
         console.warn("[MarketAquarium] marketEvent failed:", err);
-        setActiveEvent({ text, impact: "neutral", source: "user" });
+        setActiveEvent({ text: ev.text, impact: "neutral", source: "user" });
       })
       .finally(() => setComputing(false));
   }, [sessionUid, startTimer, gameFinished, pushLog]);
