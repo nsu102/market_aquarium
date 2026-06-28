@@ -256,6 +256,9 @@ class GameSession:
                 "post_text": my_posts[-1].content if my_posts else None,
                 "trade_action": tr.action.value if tr else "HOLD",
                 "trade_symbol": tr.symbol if tr else None,
+                "trade_qty": tr.qty if tr else 0.0,
+                "trade_price": tr.price if tr else 0.0,
+                "trade_cash_after": tr.cash_after if tr else ag.cash,
                 "traded": bool(tr and tr.action.value != "HOLD"),
             })
         return rr
