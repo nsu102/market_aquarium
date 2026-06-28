@@ -484,7 +484,7 @@ export default function Home() {
             onKeyboardEnabled={handleKeyboardEnabled}
             onResume={handleGameResume}
             onStop={handleGamePause}
-            forceEventOpen={needEvent && !gameFinished}
+            forceEventOpen={needEvent && !gameFinished && !reportOpen}
             onOpenEvent={() => !gameFinished && setNeedEvent(true)}
             gameFinished={gameFinished}
           />
