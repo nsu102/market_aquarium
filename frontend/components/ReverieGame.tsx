@@ -36,7 +36,7 @@ import {
   type ProcessEnvironmentBody,
   type ReverieMeta,
 } from "@/lib/reverieApi";
-import { parseTradeLabel, type TradeBubble } from "@/constants/trade";
+import { parseTradeLabel, type TradeBubble, type TradeAction } from "@/constants/trade";
 
 const TILE_WIDTH = 32;
 const CURR_MAZE = "the_ville";
@@ -62,11 +62,13 @@ interface Props {
   onSelectAgent?: (original: string) => void;
   /** Called once when a round's animation finishes (timeline drained). */
   onRoundEnd?: (round: number) => void;
+  /** Called on the step a persona reaches the exchange and trades (per-step). */
+  onAgentTrade?: (original: string, action: TradeAction) => void;
 }
 
 type LoadPhase = "loading" | "ready" | "down" | "error";
 
-export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgent, onRoundEnd }: Props) {
+export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgent, onRoundEnd, onAgentTrade }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onTickRef = useRef(onTick);
   onTickRef.current = onTick;
@@ -74,6 +76,8 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
   onSelectRef.current = onSelectAgent;
   const onRoundEndRef = useRef(onRoundEnd);
   onRoundEndRef.current = onRoundEnd;
+  const onAgentTradeRef = useRef(onAgentTrade);
+  onAgentTradeRef.current = onAgentTrade;
 
   const personasRef = useRef<GamePersona[]>([]);
   const initialStepRef = useRef(0);
@@ -534,6 +538,7 @@ export default function ReverieGame({ simCode, onTick, controlsRef, onSelectAgen
             const tb = parseTradeLabel(unit.description);
             if (tb && unit.description !== lastDesc[under]) {
               showTradeBubble(under, tb);
+              onAgentTradeRef.current?.(p.original, tb.action);
             }
             lastDesc[under] = unit.description;
           }
