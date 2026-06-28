@@ -5,18 +5,37 @@ Single source of truth for event sentiment. Used by engine.py and llm.py.
 
 from __future__ import annotations
 
+import os
+import threading
+
 from .models import EventImpact
 
-# ponytail: lazy-load once on first call
 _pipeline = None
+_lock = threading.Lock()
 
 
 def _get_pipeline():
     global _pipeline
-    if _pipeline is None:
+    if _pipeline is not None:
+        return _pipeline if _pipeline else None
+    with _lock:
+        if _pipeline is not None:
+            return _pipeline if _pipeline else None
         try:
+            # Skip network checks after first download — saves ~1.5s per call
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
             from transformers import pipeline
-            _pipeline = pipeline("text-classification", model="snunlp/KR-FinBert-SC")
+            try:
+                _pipeline = pipeline(
+                    "text-classification", model="snunlp/KR-FinBert-SC",
+                    local_files_only=True,
+                )
+            except OSError:
+                # First run: download the model
+                os.environ.pop("HF_HUB_OFFLINE", None)
+                _pipeline = pipeline(
+                    "text-classification", model="snunlp/KR-FinBert-SC",
+                )
         except Exception:
             _pipeline = False
     return _pipeline if _pipeline else None
@@ -28,7 +47,6 @@ _LABEL_MAP = {
     "neutral": EventImpact.NEUTRAL,
 }
 
-# ponytail: keyword fallback for short user inputs the model calls neutral
 _NEG_KW = {"해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산",
            "악재", "악제", "장애", "중단", "다운", "소송", "유출",
            "하락", "떨어", "약세", "손실", "적자", "실패"}
@@ -54,7 +72,6 @@ def classify_impact(text: str) -> EventImpact:
                 return _LABEL_MAP[result["label"]]
         except Exception:
             pass
-    # Model neutral or unavailable — keywords catch short user inputs
     return _keyword_fallback(text) or EventImpact.NEUTRAL
 
 
