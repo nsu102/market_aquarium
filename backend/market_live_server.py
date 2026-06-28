@@ -110,9 +110,6 @@ def _stable_int(text: str) -> int:
 # --------------------------------------------------------------------------- #
 # App + shared state
 # --------------------------------------------------------------------------- #
-import logging
-logging.basicConfig(level=logging.INFO)
-
 app = FastAPI(title="Market Aquarium Live")
 
 # Pre-warm the sentiment model so the first event doesn't pay the load cost.
@@ -283,19 +280,16 @@ class Live:
             self.walk_idle[orig] = self._walk_rng.randint(4, 14)
         return nxt
 
-    def build_timeline(self, actions_override: dict | None = None):
-        """Choreograph this round's actions into per-agent home->...->home paths.
-
-        When ``actions_override`` is provided (e.g. empty dict for a pre-build
-        before round results are ready), use those instead of last_round_actions.
-        """
+    def build_timeline(self):
+        """Choreograph this round's actions into per-agent home->...->home paths."""
+        # Start this round's timeline at the frontend's current step so it
+        # continues seamlessly (the frontend never rewinds its step counter).
         self.base = self.last_poll_step
+        # Absolute step at which each agent ARRIVES at the board/exchange this
+        # round, so posts/trades reveal as agents arrive (not all up front).
         self.board_arrival: dict[str, int] = {}
         self.exchange_arrival: dict[str, int] = {}
-        if actions_override is not None:
-            actions = actions_override
-        else:
-            actions = {a["agent_id"]: a for a in self.game.last_round_actions}
+        actions = {a["agent_id"]: a for a in self.game.last_round_actions}
         rng = random.Random(self.game.seed + self.game.round)
 
         per_agent_frames: dict[str, list] = {}
@@ -692,85 +686,33 @@ def control_market_event(body: EventBody):
     if live.game.finished:
         return {"status": "finished", "round": live.game.round,
                 "error": "5 라운드 종료 — 재시작하세요"}
-    # Prevent double-submit while a round is already running
-    if getattr(live, "_round_running", False):
-        return {"status": "error", "error": "이전 라운드가 아직 진행 중입니다"}
-
     live.start_market = live.game.market.model_dump()
     live.start_prices = {a.symbol: a.price for a in live.game.assets}
+    try:
+        live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
+    except RuntimeError as e:
+        return {"status": "finished", "round": live.game.round, "error": str(e)}
+    except Exception as e:
+        return {"status": "error", "round": live.game.round, "error": str(e)[:200]}
+    _st = live.game.state()
+    live.final_market = _st["market"]
+    live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
+    try:
+        live.build_timeline()
+    except Exception as e:
+        return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
 
-    # --- Phase A: classify impact only (fast, ~0.05s cached) → respond immediately ---
-    from backend.sim.engine import classify_impact
-    impact = classify_impact(body.text)
-    impact_val = impact.value if hasattr(impact, "value") else impact
+    # persist game state to DB
+    try:
+        from backend import db
+        db.save_game_state(body.uid, _st) if body.uid else None
+    except Exception as e:
+        print(f"[WARN] save_game_state failed: {e}")
 
-    # Advance round counter + create event now so the response has the right round
-    game = live.game
-    game.emotion_prev = {a.id: game._emo_snapshot(a) for a in game._all_agents()}
-    game._settle_votes()
-    game.round += 1
-    game._round_prepared = True
-    rnd = game.round
-
-    # --- Phase B: everything else in a background thread → push via WebSocket ---
-    live._progress_queue = []
-    live._round_running = True
-
-    def _run_background():
-        try:
-            # Build timeline immediately with placeholder actions so movement
-            # starts right away. Labels update when the round finishes.
-            placeholder = {ag.id: {
-                "agent_id": ag.id, "alias": ag.alias,
-                "posted": False, "trade_action": "HOLD",
-            } for ag in game.agents}
-            try:
-                live.build_timeline(actions_override=placeholder)
-                live._progress_queue.append({"phase": "timeline_ready"})
-            except Exception as e:
-                print(f"[WARN] pre-build timeline: {e}")
-
-            def _on_progress(phase, snapshot):
-                live._progress_queue.append({"phase": phase, **snapshot})
-
-            game.run_round(
-                body.text, source=body.source, is_rumor=body.is_rumor,
-                impact=impact, on_progress=_on_progress,
-            )
-            _st = game.state()
-            live.final_market = _st["market"]
-            live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
-            # Rebuild timeline with real actions (labels update)
-            try:
-                live.build_timeline()
-            except Exception as e:
-                print(f"[WARN] rebuild timeline: {e}")
-            # Push final state
-            live._progress_queue.append({
-                "phase": "done",
-                **game._progress_snapshot(rnd),
-                "round_report": _st.get("round_report"),
-                "finished": game.finished,
-            })
-            # persist
-            try:
-                from backend import db
-                db.save_game_state(body.uid, _st) if body.uid else None
-            except Exception as e:
-                print(f"[WARN] save_game_state: {e}")
-        except Exception as e:
-            live._progress_queue.append({"phase": "error", "error": str(e)[:200]})
-        finally:
-            live._round_running = False
-
-    threading.Thread(target=_run_background, daemon=True).start()
-
-    return {
-        "status": "ok",
-        "round": rnd,
-        "event": body.text,
-        "impact": impact_val,
-    }
+    ev = live.game.events[0] if live.game.events else None
+    return {"status": "ok", "round": live.game.round,
+            "event": ev.text if ev else body.text,
+            "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
 
 
 @app.get("/control/market/state")
@@ -932,24 +874,6 @@ def api_env_update(body: StepBody):
     if live is None:
         return {"<step>": -1}
     return live.movement_payload(body.step)
-
-
-@app.websocket("/ws/progress/{uid}")
-async def ws_progress(websocket: WebSocket, uid: str):
-    """Push round progress (SNS posts, trades) as they complete."""
-    await websocket.accept()
-    try:
-        sent = 0
-        while True:
-            live = _get_live(uid)
-            if live and hasattr(live, "_progress_queue"):
-                q = live._progress_queue
-                while sent < len(q):
-                    await websocket.send_json(q[sent])
-                    sent += 1
-            await asyncio.sleep(0.2)
-    except WebSocketDisconnect:
-        pass
 
 
 @app.websocket("/ws/movement/{uid}")

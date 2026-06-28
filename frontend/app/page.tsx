@@ -105,8 +105,6 @@ export default function Home() {
   // True when user presses "정지" — freezes both the cosmetic timer AND the game loop.
   const [gamePaused, setGamePaused] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimerRef = useRef<(() => void) | null>(null);
-  const progressWsRef = useRef<WebSocket | null>(null);
 
   /** Sync comment ID tracking whenever posts are set from any source. */
   const syncPosts = useCallback((newPosts: Post[]) => {
@@ -125,55 +123,6 @@ export default function Home() {
     const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
     setActivityLog((prev) => [...prev.slice(-99), { id, time, text }]);
   }, []);
-
-  /** Connect to progress WebSocket for real-time SNS updates during rounds. */
-  const connectProgress = useCallback((uid: string) => {
-    if (progressWsRef.current) {
-      progressWsRef.current.close();
-      progressWsRef.current = null;
-    }
-    const wsBase = (process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000").replace(/^http/, "ws");
-    const ws = new WebSocket(`${wsBase}/ws/progress/${uid}`);
-    ws.onmessage = (ev) => {
-      const data = JSON.parse(ev.data);
-      if (data.posts) {
-        const incoming = data.posts as Post[];
-        const newPosts = incoming.slice(prevPostCountRef.current);
-        for (const p of newPosts) {
-          pushLog(`${p.agentAlias}가 게시판에 글을 남겼습니다`);
-        }
-        for (const p of incoming) {
-          for (const c of p.comments ?? []) {
-            if (c.id && !prevCommentIdsRef.current.has(c.id)) {
-              prevCommentIdsRef.current.add(c.id);
-              pushLog(`${c.agentAlias}가 댓글을 남겼습니다`);
-            }
-          }
-        }
-        syncPosts(incoming);
-      }
-      if (data.agents) setAgents(data.agents);
-      if (data.sns_agents) setSnsAgents(data.sns_agents);
-      if (data.emotion_deltas) setEmotionDeltas(data.emotion_deltas);
-      if (data.market) setMarketData(data.market);
-      if (data.round_report) setRoundReport(data.round_report);
-      if (data.phase === "timeline_ready") {
-        startTimerRef.current?.();
-        control.run(STEPS_PER_DAY, uid).catch((err) => {
-          console.warn("[MarketAquarium] run after timeline_ready:", err);
-        });
-      }
-      if (data.phase === "done") {
-        setComputing(false);
-        if (data.finished) {
-          setGameFinished(true);
-          pushLog("게임이 종료되었습니다. 종합 리포트를 확인하세요.");
-        }
-      }
-    };
-    ws.onerror = () => ws.close();
-    progressWsRef.current = ws;
-  }, [pushLog, syncPosts]);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -200,7 +149,6 @@ export default function Home() {
       setClock(t);
     }, 60);
   }, [stopTimer]);
-  startTimerRef.current = startTimer;
 
   useEffect(() => () => stopTimer(), [stopTimer]);
 
@@ -347,8 +295,6 @@ export default function Home() {
     setNeedEvent(false);
     setComputing(true);
     pushLog(`이벤트 발생: ${text}`);
-    // Connect progress WebSocket to receive SNS updates in real-time
-    if (sessionUid) connectProgress(sessionUid);
     control
       .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
       .then((res) => {
@@ -357,14 +303,25 @@ export default function Home() {
           impact: normalizeImpact(res.impact),
           source: "user",
         });
-        // Timer + movement start when WS sends "timeline_ready"
+        // Extract board data from the event response when available
+        const s = (res as any).state;
+        if (s) {
+          if (s.sns_agents) setSnsAgents(s.sns_agents);
+          if (s.emotion_deltas) setEmotionDeltas(s.emotion_deltas);
+        }
+        // Start the cosmetic day clock + focus a random NPC
+        startTimer();
+        reverieControlsRef.current?.focusAgent();
+        control.run(STEPS_PER_DAY, sessionUid ?? undefined).catch((err) => {
+          console.warn("[MarketAquarium] run after event:", err);
+        });
       })
       .catch((err) => {
         console.warn("[MarketAquarium] marketEvent failed:", err);
         setActiveEvent({ text, impact: "neutral", source: "user" });
-        setComputing(false);
-      });
-  }, [sessionUid, startTimer, gameFinished, pushLog, connectProgress]);
+      })
+      .finally(() => setComputing(false));
+  }, [sessionUid, startTimer, gameFinished, pushLog]);
 
   // D4: like/dislike a post or comment.
   const handleVote = useCallback(
@@ -561,11 +518,13 @@ export default function Home() {
         <RoundReport report={reportForView} onClose={() => setReportOpen(false)} />
       )}
 
-      {/* Computing a round (LLM) — non-blocking pill indicator */}
+      {/* Computing a round (LLM) — show progress so the wait is not a dead screen */}
       {computing && (
-        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 bg-white border-2 border-black rounded-full shadow-pixel-sm px-4 py-2">
-          <Loader2 size={14} className="text-pixel-greenText animate-spin" />
-          <span className="text-[12px] font-bold text-black">에이전트 반응 중</span>
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-pixel-ink/60">
+          <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg px-6 py-5 flex flex-col items-center gap-3 max-w-[320px]">
+            <Loader2 size={28} className="text-pixel-greenText animate-spin" />
+            <div className="text-sm font-bold text-black">에이전트들이 반응하는 중...</div>
+          </div>
         </div>
       )}
 
