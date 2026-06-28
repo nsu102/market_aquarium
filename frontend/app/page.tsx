@@ -105,6 +105,17 @@ export default function Home() {
   const [gamePaused, setGamePaused] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  /** Sync comment ID tracking whenever posts are set from any source. */
+  const syncPosts = useCallback((newPosts: Post[]) => {
+    prevPostCountRef.current = newPosts.length;
+    for (const p of newPosts) {
+      for (const c of p.comments ?? []) {
+        if (c.id) prevCommentIdsRef.current.add(c.id);
+      }
+    }
+    setPosts(newPosts);
+  }, []);
+
   const pushLog = useCallback((text: string) => {
     const id = `log-${++logIdRef.current}`;
     const now = new Date();
@@ -316,7 +327,7 @@ export default function Home() {
       control
         .boardVote({ uid: sessionUid ?? undefined, ...input })
         .then((res) => {
-          if (res.posts) setPosts(res.posts);
+          if (res.posts) syncPosts(res.posts);
         })
         .catch((err) => console.warn("[MarketAquarium] vote:", err));
     },
@@ -329,7 +340,7 @@ export default function Home() {
       control
         .boardPost({ uid: sessionUid ?? undefined, ...input })
         .then((res) => {
-          if (res.posts) { setPosts(res.posts); sfxPost(); }
+          if (res.posts) { syncPosts(res.posts); sfxPost(); }
           if (res.agents) setAgents(res.agents);
           if (res.sns_agents) setSnsAgents(res.sns_agents);
           if (res.emotion_deltas) setEmotionDeltas(res.emotion_deltas);
