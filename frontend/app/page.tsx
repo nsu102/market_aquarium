@@ -58,6 +58,7 @@ function normalizeImpact(
 }
 
 export default function Home() {
+  const [splashVisible, setSplashVisible] = useState(true);
   const [gameStarted, setGameStarted] = useState(false);
   const [currentRound, setCurrentRound] = useState(0);
   const [marketOpen, setMarketOpen] = useState(true);
@@ -422,6 +423,10 @@ export default function Home() {
     [agents, pushLog]
   );
 
+  if (splashVisible) {
+    return <SplashScreen onDismiss={() => setSplashVisible(false)} />;
+  }
+
   if (!gameStarted) {
     return <SetupScreen onStart={handleStart} onResume={handleResume} />;
   }
@@ -549,6 +554,31 @@ export default function Home() {
         />
       )}
 
+    </div>
+  );
+}
+
+/* ── Splash / Title Screen ── */
+function SplashScreen({ onDismiss }: { onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div
+      onClick={onDismiss}
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-[#f5f0e1] cursor-pointer select-none"
+    >
+      <img
+        src="/img/title_image.png"
+        alt="Market Village"
+        className="w-[min(80vw,600px)] animate-pixel-pop"
+        draggable={false}
+      />
+      <p className="mt-8 text-[13px] text-pixel-muted font-pixel animate-pulse">
+        화면을 클릭하여 시작
+      </p>
     </div>
   );
 }
