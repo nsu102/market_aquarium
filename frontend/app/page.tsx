@@ -155,6 +155,14 @@ export default function Home() {
       if (data.sns_agents) setSnsAgents(data.sns_agents);
       if (data.emotion_deltas) setEmotionDeltas(data.emotion_deltas);
       if (data.market) setMarketData(data.market);
+      if (data.round_report) setRoundReport(data.round_report);
+      if (data.phase === "done") {
+        setComputing(false);
+        if (data.finished) {
+          setGameFinished(true);
+          pushLog("게임이 종료되었습니다. 종합 리포트를 확인하세요.");
+        }
+      }
     };
     ws.onerror = () => ws.close();
     progressWsRef.current = ws;
@@ -356,9 +364,9 @@ export default function Home() {
       .catch((err) => {
         console.warn("[MarketAquarium] marketEvent failed:", err);
         setActiveEvent({ text, impact: "neutral", source: "user" });
-      })
-      .finally(() => setComputing(false));
-  }, [sessionUid, startTimer, gameFinished, pushLog]);
+        setComputing(false);
+      });
+  }, [sessionUid, startTimer, gameFinished, pushLog, connectProgress]);
 
   // D4: like/dislike a post or comment.
   const handleVote = useCallback(

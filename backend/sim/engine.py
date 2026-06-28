@@ -226,14 +226,21 @@ class GameSession:
         timestamp: str | None = None,
         on_progress: callable | None = None,
     ) -> RoundReport:
-        """Advance one round given the user's single event (FR-1 .. FR-8)."""
-        if self.finished:
-            raise RuntimeError("simulation already finished (5 rounds)")
-        # Snapshot every axis BEFORE this round's changes so the 감정 탭 can show
-        # the per-round delta, then settle last round's votes into confidence.
-        self.emotion_prev = {a.id: self._emo_snapshot(a) for a in self._all_agents()}
-        self._settle_votes()
-        self.round += 1
+        """Advance one round given the user's single event (FR-1 .. FR-8).
+
+        When called from the server's background thread, the server may have
+        already advanced self.round and settled votes. Pass the pre-advanced
+        round number to skip that step (``_round_prepared=True`` internally).
+        """
+        _prepared = getattr(self, "_round_prepared", False)
+        if not _prepared:
+            if self.finished:
+                raise RuntimeError("simulation already finished")
+            self.emotion_prev = {a.id: self._emo_snapshot(a) for a in self._all_agents()}
+            self._settle_votes()
+            self.round += 1
+        else:
+            self._round_prepared = False
         rnd = self.round
         ts = timestamp or f"Day{rnd} 09:00"
         _t0 = time.monotonic()

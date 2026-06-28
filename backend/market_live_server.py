@@ -689,43 +689,72 @@ def control_market_event(body: EventBody):
     if live.game.finished:
         return {"status": "finished", "round": live.game.round,
                 "error": "5 라운드 종료 — 재시작하세요"}
+    # Prevent double-submit while a round is already running
+    if getattr(live, "_round_running", False):
+        return {"status": "error", "error": "이전 라운드가 아직 진행 중입니다"}
+
     live.start_market = live.game.market.model_dump()
     live.start_prices = {a.symbol: a.price for a in live.game.assets}
 
-    # Progress callback: push partial state to connected WebSocket clients
-    def _on_progress(phase: str, snapshot: dict):
-        live._progress_queue.append({"phase": phase, **snapshot})
+    # --- Phase A: classify impact only (fast, ~0.05s cached) → respond immediately ---
+    from backend.sim.engine import classify_impact
+    impact = classify_impact(body.text)
+    impact_val = impact.value if hasattr(impact, "value") else impact
 
+    # Advance round counter + create event now so the response has the right round
+    game = live.game
+    game.emotion_prev = {a.id: game._emo_snapshot(a) for a in game._all_agents()}
+    game._settle_votes()
+    game.round += 1
+    game._round_prepared = True
+    rnd = game.round
+
+    # --- Phase B: everything else in a background thread → push via WebSocket ---
     live._progress_queue = []
+    live._round_running = True
 
-    try:
-        live.game.run_round(
-            body.text, source=body.source, is_rumor=body.is_rumor,
-            on_progress=_on_progress,
-        )
-    except RuntimeError as e:
-        return {"status": "finished", "round": live.game.round, "error": str(e)}
-    except Exception as e:
-        return {"status": "error", "round": live.game.round, "error": str(e)[:200]}
-    _st = live.game.state()
-    live.final_market = _st["market"]
-    live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
-    try:
-        live.build_timeline()
-    except Exception as e:
-        return {"status": "error", "round": live.game.round, "error": f"timeline: {str(e)[:160]}"}
+    def _run_background():
+        try:
+            def _on_progress(phase, snapshot):
+                live._progress_queue.append({"phase": phase, **snapshot})
 
-    # persist game state to DB
-    try:
-        from backend import db
-        db.save_game_state(body.uid, _st) if body.uid else None
-    except Exception as e:
-        print(f"[WARN] save_game_state failed: {e}")
+            game.run_round(
+                body.text, source=body.source, is_rumor=body.is_rumor,
+                impact=impact, on_progress=_on_progress,
+            )
+            _st = game.state()
+            live.final_market = _st["market"]
+            live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
+            try:
+                live.build_timeline()
+            except Exception as e:
+                print(f"[WARN] build_timeline failed: {e}")
+            # Push final state
+            live._progress_queue.append({
+                "phase": "done",
+                **game._progress_snapshot(rnd),
+                "round_report": _st.get("round_report"),
+                "finished": game.finished,
+            })
+            # persist
+            try:
+                from backend import db
+                db.save_game_state(body.uid, _st) if body.uid else None
+            except Exception as e:
+                print(f"[WARN] save_game_state: {e}")
+        except Exception as e:
+            live._progress_queue.append({"phase": "error", "error": str(e)[:200]})
+        finally:
+            live._round_running = False
 
-    ev = live.game.events[0] if live.game.events else None
-    return {"status": "ok", "round": live.game.round,
-            "event": ev.text if ev else body.text,
-            "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
+    threading.Thread(target=_run_background, daemon=True).start()
+
+    return {
+        "status": "ok",
+        "round": rnd,
+        "event": body.text,
+        "impact": impact_val,
+    }
 
 
 @app.get("/control/market/state")
