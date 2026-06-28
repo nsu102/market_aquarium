@@ -42,10 +42,22 @@ _HOT_WORDS = (
 )
 
 _SYSTEM = (
-    "You are simulating one investor browsing a market community board in a "
-    "psychology game. You read the feed, then decide whether to speak once. "
-    "Output strict JSON only."
+    "You are roleplaying one investor on a chaotic Korean crypto community board "
+    "(like 디시 코인갤 / 단톡방). You read the feed, then fire off ONE punchy "
+    "reaction. Stay 100% in character. Output strict JSON only."
 )
+
+# Persona-flavoured fallback lines for FORCED writes (SNS spectators must speak).
+_FORCED_LINE = {
+    "panic_seller": "이거 느낌 쎄한데... 다들 괜찮은 거 맞아요?",
+    "fomo_trader": "지금 안 타면 평생 후회한다 ㅋㅋ 가즈아",
+    "value_investor": "감정적으로 갈 때 아닙니다. 숫자를 보세요.",
+    "quant": "지표상 과열인데 다들 흥분했네요.",
+    "whale": "개미들 또 패닉이네. 조용히 줍는다.",
+    "contrarian": "다들 한 방향이면 저는 반대로 갑니다.",
+    "conspiracy": "이거 그냥 우연 아닙니다. 작전 냄새 나는데?",
+    "news_bot": "요약: 변동성 확대. 다들 멘탈 잡으세요.",
+}
 
 _FALLBACK: dict[str, object] = {"kind": "SKIP"}
 
@@ -109,6 +121,14 @@ def _auto_target(threads: list[Post]) -> str | None:
     return best[1].id
 
 
+def _spread_target(threads: list[Post], agent: Agent) -> str | None:
+    """Pick a thread deterministically by agent so forced comments fan out across
+    DIFFERENT threads instead of all piling on the single most-liked one."""
+    if not threads:
+        return None
+    return threads[(hash(agent.id) & 0x7FFFFFFF) % len(threads)].id
+
+
 def _thread_by_id(threads: list[Post], thread_id: str | None) -> Post | None:
     if not thread_id:
         return None
@@ -153,8 +173,23 @@ def decide_write(
     threads: list[Post],
     interests: list[str] | None = None,
     sectors: list[str] | None = None,
+    force: bool = False,
+    post_only: bool = False,
+    min_round_threads: int = 0,
+    max_round_threads: int = 0,
 ) -> SnsWrite:
-    """One LLM call -> the single utterance (or SKIP). Never raises."""
+    """One LLM call -> the single utterance (or SKIP). Never raises.
+
+    ``force=True`` (SNS spectators, D2) forbids SKIP: a silent decision is
+    upgraded to a POST so every spectator leaves a mark on the board each round.
+    ``post_only=True`` (the round's first two agents, plan §2) coerces ANY
+    decision (SKIP/COMMENT/REPLY) into a fresh POST, so the board always opens
+    with real threads to react to.
+    ``min_round_threads`` / ``max_round_threads`` shape the board's spread:
+    below the floor a COMMENT is upgraded to a fresh POST (avoid one giant
+    pile-on); at/above the cap a POST is downgraded to a COMMENT (guarantee real
+    discussion). Together they target ~half posts / half comments per round.
+    """
     interests = interests or []
     sectors = sectors or []
     interest_line = ""
@@ -168,22 +203,27 @@ def decide_write(
     # The event headline is a NOTICE (shown as context), not a thread to reply to.
     # Agents discuss with EACH OTHER -> only investor posts are repliable threads.
     discussion = [t for t in threads if t.agentId != "system"]
+    skip_clause = (
+        "You MUST speak this round — never SKIP.\n" if force
+        else "Only SKIP if you genuinely have nothing to add.\n"
+    )
     user = (
         f"{_persona_block(agent)}{interest_line}\n\n"
         f"{_feed_block(event, discussion)}\n\n"
-        "This is a focus-group-style discussion among investors reacting to the "
-        "event. React with ONE utterance, true to your personality. ENGAGE with a "
-        "SPECIFIC other investor above when there is one — name your stance toward "
-        "their point (agree / push back / add nuance) via COMMENT or REPLY. Start "
-        "a new POST only to open a genuinely different angle no one raised. "
-        "You MUST speak -- SKIP is only allowed if you literally have nothing "
-        "new to say AND the board already has 5+ threads this round.\n"
-        "Bring a perspective the others have NOT voiced; do NOT repeat anything "
-        "already on the board (yours or others'). React to THIS event in fresh wording.\n"
-        "Do NOT repeat anything you (or others) already said on the board -- react "
-        "specifically to THIS event and the latest messages, in fresh wording.\n"
-        "Be concrete about the assets/sectors you care about (listed above), "
-        "mention specific tickers, and set symbol_tags to those tickers.\n"
+        "It's a noisy crypto group chat reacting to the event. Fire ONE reaction "
+        "in YOUR character's DISTINCT voice. SHORT (1 sentence, max ~30자), punchy "
+        "and EMOTIONAL — sound like a REAL person, not a template.\n"
+        "Casual Korean with natural slang is fine, but VARY your wording — do NOT "
+        "lean on the same crutch phrases everyone overuses (ㄷㄷ, 가즈아, 존버, "
+        "손절각, 떡상). Say something with a detail, comparison, joke or angle that "
+        "NObody else on the board has said. NO emojis, NO hashtags, NO essays.\n"
+        "Mix it up: ENGAGE someone with a COMMENT/REPLY when you want to agree, "
+        "clap back or pile on — but DON'T let everyone crowd one thread. If your "
+        "take is a different angle or ticker, open your OWN new POST instead.\n"
+        + skip_clause +
+        "Do NOT echo anything already on the board (yours or others') — every line "
+        "must be visibly different in content AND wording.\n"
+        "Prefer a ticker you actually care about (not just BTC) and set symbol_tags.\n"
         "For COMMENT/REPLY, set target_thread_id to the thread you are replying to.\n"
         "Respond with JSON only: "
         '{"kind": "POST|COMMENT|REPLY|SKIP", "text": "your short Korean message", '
@@ -210,12 +250,51 @@ def decide_write(
     if kind is not WriteKind.SKIP and text is None:
         kind = WriteKind.SKIP
 
+    # SNS spectators (force) are not allowed to stay silent: upgrade SKIP / empty
+    # to a POST with an in-character fallback line.
+    if force and (kind is WriteKind.SKIP or text is None):
+        kind = WriteKind.POST
+        text = text or _FORCED_LINE.get(agent.type, "오 이거 각인데?")
+
+    # post_only (the round's opening two agents): force a fresh POST regardless of
+    # what the LLM picked, so the board always opens with threads to react to.
+    if post_only:
+        kind = WriteKind.POST
+        target_id = None
+        text = text or _FORCED_LINE.get(agent.type, "오 이거 각인데?")
+
+    # Shape the board's spread by how many threads already exist THIS round.
+    if (min_round_threads or max_round_threads) and text:
+        round_discussion = [t for t in discussion if t.round == event.round]
+        round_threads = len(round_discussion)
+        if (
+            min_round_threads
+            and kind in (WriteKind.COMMENT, WriteKind.REPLY)
+            and round_threads < min_round_threads
+        ):
+            # floor: not enough threads yet -> open a fresh POST
+            kind = WriteKind.POST
+            target_id = None
+        elif (
+            max_round_threads
+            and kind is WriteKind.POST
+            and round_threads >= max_round_threads
+            and round_discussion
+        ):
+            # cap: enough threads exist -> join the discussion, fanning out across
+            # DIFFERENT threads (not all onto the single most-liked one).
+            spread = _spread_target(round_discussion, agent)
+            if spread:
+                kind = WriteKind.COMMENT
+                target_id = spread
+
     # --- resolve target for COMMENT/REPLY (investor threads only) -------- #
     if kind in (WriteKind.COMMENT, WriteKind.REPLY):
         target = _thread_by_id(discussion, target_id)
         if target is None:
-            # LLM gave no/invalid target: auto-pick the most relevant investor thread.
-            target_id = _auto_target(discussion)
+            # LLM gave no/invalid target: fan out across threads (not all onto the
+            # single most-liked one) so replies aren't bunched on one post.
+            target_id = _spread_target(discussion, agent)
             if target_id is None:
                 # No investor thread yet -> open the discussion with a fresh post.
                 kind = WriteKind.POST
@@ -248,14 +327,25 @@ def view_sns(
     timestamp: str = "",
     interests: list[str] | None = None,
     sectors: list[str] | None = None,
+    force: bool = False,
+    post_only: bool = False,
+    min_round_threads: int = 0,
+    max_round_threads: int = 0,
 ) -> SnsResult:
     """Read the whole feed (contagion input) and produce one utterance.
 
     Exactly one LLM call is made (the write decision); the injected thoughts are
     built deterministically so the read half stays stable and cost-free.
+    ``force`` forbids SKIP (SNS spectators, D2); ``post_only`` coerces a POST
+    (the round's opening two agents); ``min_round_threads`` /
+    ``max_round_threads`` shape the post-vs-comment spread for the round.
     """
     injected = read_feed(event, threads, created=timestamp)
-    write = decide_write(client, agent, event, threads, interests=interests, sectors=sectors)
+    write = decide_write(
+        client, agent, event, threads, interests=interests, sectors=sectors,
+        force=force, post_only=post_only, min_round_threads=min_round_threads,
+        max_round_threads=max_round_threads,
+    )
     return SnsResult(injected_thoughts=injected, write=write)
 
 
@@ -296,6 +386,12 @@ def apply_sns_write(
             return None
         target = threads[-1]
     target.comments.append(
-        Comment(agentId=agent.id, agentAlias=agent.alias, content=write.text or "")
+        Comment(
+            id=f"c_{agent.id}_{round}_{len(target.comments)}",
+            agentId=agent.id,
+            agentAlias=agent.alias,
+            content=write.text or "",
+            round=round,
+        )
     )
     return target

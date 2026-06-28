@@ -113,6 +113,12 @@ class Persona(BaseModel):
 
     default_fear: float = 50.0
     default_greed: float = 50.0
+    # Seed defaults for the detail axes (D3/7): persona-fixed starting points,
+    # then nudged by the per-event LLM measurement. fear/greed stay the primary
+    # axes; these three are persona-seeded, not user-set.
+    default_confidence: float = 50.0
+    default_excitement: float = 50.0
+    default_trust: float = 50.0
 
     # optional behavioural sensitivities (0..1)
     herd_sensitivity: float = 0.5
@@ -131,6 +137,12 @@ class Agent(BaseModel):
     portfolio: list[PortfolioHolding] = Field(default_factory=list)
     fear: float = 50.0
     greed: float = 50.0
+    # Extra emotion axes (D3): each 0..100, 50 = neutral midpoint.
+    confidence: float = 50.0   # 자신감 ↔ 위축 (driven by likes − dislikes)
+    excitement: float = 50.0   # 흥분 ↔ 침착 (driven by hype/volatility)
+    trust: float = 50.0        # 신뢰 ↔ 의심 (driven by news credibility/rumors)
+    # SNS-only agents live only on the board (no map/movement/trade).
+    sns_only: bool = False
     lastAction: str = "HOLD"
     location: Location = Location.HOME
     position: Position = Field(default_factory=Position)
@@ -171,9 +183,15 @@ class Event(BaseModel):
 
 
 class Comment(BaseModel):
+    id: str = ""
     agentId: str
     agentAlias: str
     content: str
+    likes: int = 0
+    dislikes: int = 0
+    is_user: bool = False
+    mentions: list[str] = Field(default_factory=list)
+    round: int = 1
 
 
 class Post(BaseModel):
@@ -190,16 +208,26 @@ class Post(BaseModel):
     sector: str = ""
     symbol_tags: list[str] = Field(default_factory=list)
     likes: int = 0
+    dislikes: int = 0
     comments: list[Comment] = Field(default_factory=list)
+    is_user: bool = False
+    mentions: list[str] = Field(default_factory=list)
     timestamp: str = ""
     round: int = 1
 
 
 class EmotionDelta(BaseModel):
-    """FR-2: LLM-returned fear/greed delta, applied via the price/state formula."""
+    """FR-2: LLM-returned emotion delta across the 5 axes (D3).
+
+    fear/greed feed the price/state formula; the extra three axes (confidence,
+    excitement, trust) are surfaced in the 감정 탭 and nudged by the same stimuli.
+    """
 
     fear_delta: float = 0.0
     greed_delta: float = 0.0
+    confidence_delta: float = 0.0
+    excitement_delta: float = 0.0
+    trust_delta: float = 0.0
 
 
 class InjectedThought(BaseModel):

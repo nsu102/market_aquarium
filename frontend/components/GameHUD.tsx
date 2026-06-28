@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Fish,
+  Clock,
   BarChart3,
   MessageSquare,
   Send,
@@ -15,6 +15,10 @@ import {
 
 interface Props {
   round: number;
+  /** In-game clock label "HH:MM" (00:00 → 24:00) shown in the logo slot. */
+  clock: string;
+  /** True while the day is replaying (clock advancing). */
+  playing?: boolean;
   onEvent: (text: string) => void;
   marketOpen: boolean;
   boardOpen: boolean;
@@ -43,6 +47,8 @@ function Badge({ count }: { count: number }) {
 
 export default function GameHUD({
   round,
+  clock,
+  playing = false,
   onEvent,
   marketOpen,
   boardOpen,
@@ -110,13 +116,24 @@ export default function GameHUD({
 
   return (
     <>
-      {/* ── Top-left: Logo ── */}
-      {/* <div className="absolute top-4 left-4 z-40">
-        <img src="/img/title_image.png" alt="Market Aquarium" className="h-20" />
-      </div> */}
+      {/* ── Top-left: in-game day clock + round ── */}
+      <div className="absolute top-4 left-4 z-40">
+        <div className="flex items-center gap-2.5 bg-white border-2 border-black rounded-xl px-3 py-2 shadow-pixel-sm">
+          <Clock
+            size={18}
+            className={`text-pixel-greenText ${playing ? "animate-pulse-soft" : ""}`}
+          />
+          <span className="text-lg font-extrabold text-black tracking-wider tabular-nums leading-none pixel-title">
+            {clock}
+          </span>
+          <span className="text-[10px] font-bold text-pixel-muted leading-none">
+            DAY {round}
+          </span>
+        </div>
+      </div>
 
-      {/* ── Bottom-center: Toolbar ── */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40">
+      {/* ── Bottom-left: Toolbar ── */}
+      <div className="absolute bottom-5 left-4 z-40">
         <div className="flex items-center gap-1 bg-white border-2 border-black rounded-2xl px-2 py-1.5 shadow-pixel-md">
           <ToolbarBtn
             onClick={onToggleMarket}

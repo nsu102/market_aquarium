@@ -30,8 +30,6 @@ export default function EventOverlay({ text, impact, source, onDone }: Props) {
     impact === "negative" ? "#C0564A" : impact === "positive" ? "#78F142" : "#FFE87C";
   const ImpactIcon =
     impact === "negative" ? AlertTriangle : impact === "positive" ? TrendingUp : Radio;
-  const impactLabel =
-    impact === "negative" ? "악재" : impact === "positive" ? "호재" : "중립";
 
   return (
     <div
@@ -70,19 +68,8 @@ export default function EventOverlay({ text, impact, source, onDone }: Props) {
           </div>
 
           {/* Event text */}
-          <div className="px-6 py-5">
+          <div className="px-6 py-5 pb-6">
             <p className="text-xl font-bold text-black leading-snug">{text}</p>
-          </div>
-
-          {/* Bottom strip */}
-          <div className="px-6 pb-4 flex items-center gap-3">
-            <span
-              className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 border-2 border-black rounded-full text-black"
-              style={{ background: accent }}
-            >
-              <ImpactIcon size={11} />
-              {impactLabel}
-            </span>
           </div>
         </div>
       </div>

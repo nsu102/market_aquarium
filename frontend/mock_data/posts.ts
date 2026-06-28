@@ -5,15 +5,24 @@ export interface Post {
   content: string;
   asset?: string;
   likes: number;
+  dislikes?: number;
   comments: Comment[];
+  is_user?: boolean;
+  mentions?: string[];
   timestamp: string;
   round: number;
 }
 
 export interface Comment {
+  id?: string;
   agentId: string;
   agentAlias: string;
   content: string;
+  likes?: number;
+  dislikes?: number;
+  is_user?: boolean;
+  mentions?: string[];
+  round?: number;
 }
 
 export const posts: Post[] = [

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import AgentSidebar from "@/components/AgentSidebar";
 import AssetTicker from "@/components/AssetTicker";
@@ -19,9 +19,10 @@ import { rounds } from "@/mock_data/rounds";
 import { GameEvent } from "@/mock_data/events";
 import * as control from "@/lib/control";
 import { Loader2 } from "lucide-react";
-import type { ReverieMeta } from "@/lib/reverieApi";
+import type { ReverieMeta, RoundReportMeta } from "@/lib/reverieApi";
 import type { GameControls } from "@/components/ReverieGame";
 import type { TradeAction } from "@/constants/trade";
+import { formatClock, ROUND_MINUTES, ROUND_REAL_MS } from "@/lib/timeline";
 
 // Canonical Phaser viewer is client-only (loads Phaser + the_ville assets).
 const ReverieGame = dynamic(() => import("@/components/ReverieGame"), {
@@ -36,9 +37,7 @@ interface ActiveEvent {
 
 // Canonical mode fork.
 const FORK_SIM_CODE = "base_the_ville_market6";
-// One in-game day = 1200 steps. We do NOT run at game start (agents stand idle);
-// each user event injects the shock then runs exactly one day so agents plan the
-// day AFTER the event is set and react to it the same day.
+// One in-game day = 1200 steps.
 const STEPS_PER_DAY = 1200;
 
 /** Normalize the control server's event impact into the overlay's enum. */
@@ -72,6 +71,10 @@ export default function Home() {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [snsAgents, setSnsAgents] = useState<Agent[]>([]);
+  const [emotionDeltas, setEmotionDeltas] = useState<
+    Record<string, Record<string, number>>
+  >({});
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
   // True while a round is being computed on the backend (LLM, ~10-30s).
   const [computing, setComputing] = useState(false);
@@ -81,14 +84,45 @@ export default function Home() {
   // Per-user session UID from the backend (MongoDB).
   const [sessionUid, setSessionUid] = useState<string | null>(null);
   const reverieControlsRef = useRef<GameControls | null>(null);
-  // Real round report (from meta) + end-of-game overall report.
-  const [roundReport, setRoundReport] =
-    useState<NonNullable<ReverieMeta["round_report"]> | null>(null);
+  const [roundReport, setRoundReport] = useState<RoundReportMeta | null>(null);
   const [overall, setOverall] = useState<{
     markdown: string;
     achievements: control.OverallAchievement[];
   } | null>(null);
   const overallFetchedRef = useRef(false);
+
+  // --- Cosmetic day clock (UI only, does not drive data) ---
+  const [clock, setClock] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const startTimer = useCallback(() => {
+    stopTimer();
+    setPlaying(true);
+    setClock(0);
+    const startTs = performance.now();
+    timerRef.current = setInterval(() => {
+      const elapsed = performance.now() - startTs;
+      let t = (elapsed / ROUND_REAL_MS) * ROUND_MINUTES;
+      if (t >= ROUND_MINUTES) {
+        t = ROUND_MINUTES;
+        setClock(t);
+        stopTimer();
+        setPlaying(false);
+        return;
+      }
+      setClock(t);
+    }, 60);
+  }, [stopTimer]);
+
+  useEffect(() => () => stopTimer(), [stopTimer]);
 
   /** Optimistic seed so the panels aren't empty before live data arrives. */
   const seedFromSetup = useCallback((setupAgents: Agent[], setupAssets: Asset[]) => {
@@ -105,7 +139,11 @@ export default function Home() {
     });
     setEvents([]);
     setPosts([]);
+    setSnsAgents([]);
+    setEmotionDeltas({});
     setCurrentRound(0);
+    setClock(0);
+    setPlaying(false);
   }, []);
 
   const handleStart = useCallback(
@@ -113,16 +151,10 @@ export default function Home() {
       seedFromSetup(setupAgents, setupAssets);
       setCanonicalSim(null);
       setGameStarted(true);
-      // Reset report state for the new game.
       setRoundReport(null);
       setOverall(null);
       overallFetchedRef.current = false;
 
-      // Canonical/live path: ONLY fork the reverie sim so the map renders
-      // immediately with agents standing idle at their spawn tiles. We do NOT
-      // run here — the day is planned/run only after the user injects an event,
-      // so agents react that same day. The server auto-drops any prior sim, so
-      // restarting from setup just works.
       const sim = `market_${Date.now()}`;
       control
         .start(FORK_SIM_CODE, sim)
@@ -168,7 +200,6 @@ export default function Home() {
         setCanonicalSim(sim);
         setSessionUid(savedUid);
         if (typeof res.round === "number") setCurrentRound(res.round);
-        // Fetch full state so panels populate immediately
         control.marketState(savedUid).then((st) => {
           if (st.ready) {
             if (st.market) setMarketData(st.market);
@@ -192,10 +223,11 @@ export default function Home() {
     if (meta.posts) setPosts(meta.posts);
     if (meta.events) setEvents(meta.events);
     if (typeof meta.round === "number") setCurrentRound(meta.round);
-    // Live agents (pre-computed portfolio + live cash/fear/greed/lastAction).
     if (meta.agents && meta.agents.length) setAgents(meta.agents);
-    // Real round report (with price-breakdown infographic) replaces the mock.
     if (meta.round_report) setRoundReport(meta.round_report);
+    // Extract board-specific data when available
+    if ((meta as any).sns_agents) setSnsAgents((meta as any).sns_agents);
+    if ((meta as any).emotion_deltas) setEmotionDeltas((meta as any).emotion_deltas);
     // FR-9: at the end of 5 rounds, fetch + show the overall report once.
     if (meta.finished && !overallFetchedRef.current) {
       overallFetchedRef.current = true;
@@ -219,6 +251,14 @@ export default function Home() {
           impact: normalizeImpact(res.impact),
           source: "user",
         });
+        // Extract board data from the event response when available
+        const s = (res as any).state;
+        if (s) {
+          if (s.sns_agents) setSnsAgents(s.sns_agents);
+          if (s.emotion_deltas) setEmotionDeltas(s.emotion_deltas);
+        }
+        // Start the cosmetic day clock
+        startTimer();
         control.run(STEPS_PER_DAY, sessionUid ?? undefined).catch((err) => {
           console.warn("[MarketAquarium] run after event:", err);
         });
@@ -228,7 +268,36 @@ export default function Home() {
         setActiveEvent({ text, impact: "neutral", source: "user" });
       })
       .finally(() => setComputing(false));
-  }, [sessionUid]);
+  }, [sessionUid, startTimer]);
+
+  // D4: like/dislike a post or comment.
+  const handleVote = useCallback(
+    (input: { post_id: string; comment_id?: string; dir: "like" | "dislike" }) => {
+      control
+        .boardVote({ uid: sessionUid ?? undefined, ...input })
+        .then((res) => {
+          if (res.posts) setPosts(res.posts);
+        })
+        .catch((err) => console.warn("[MarketAquarium] vote:", err));
+    },
+    [sessionUid]
+  );
+
+  // D3: user post/comment (a mention makes that agent reply now).
+  const handlePost = useCallback(
+    (input: { text: string; target_thread_id?: string; mention_agent_id?: string }) => {
+      control
+        .boardPost({ uid: sessionUid ?? undefined, ...input })
+        .then((res) => {
+          if (res.posts) setPosts(res.posts);
+          if (res.agents) setAgents(res.agents);
+          if (res.sns_agents) setSnsAgents(res.sns_agents);
+          if (res.emotion_deltas) setEmotionDeltas(res.emotion_deltas);
+        })
+        .catch((err) => console.warn("[MarketAquarium] board post:", err));
+    },
+    [sessionUid]
+  );
 
   const handleToggleReport = useCallback(() => {
     setReportOpen((prev) => !prev);
@@ -290,8 +359,7 @@ export default function Home() {
     return <SetupScreen onStart={handleStart} onResume={handleResume} />;
   }
 
-  // Round report: the real backend report (with price-breakdown infographic)
-  // when available, else the mock fallback.
+  // Round report: the real backend report when available, else the mock.
   const mockReport =
     rounds.find((r) => r.round === currentRound) || rounds[rounds.length - 1];
   const reportForView = roundReport
@@ -301,6 +369,11 @@ export default function Home() {
       price_breakdowns: roundReport.price_breakdowns,
     }
     : { round: currentRound, markdown: mockReport.markdown };
+
+  // The board-top "다음 이벤트" card only appears between rounds (round 2+),
+  // never while the day is playing or being computed.
+  const requestNextEvent =
+    needEvent && !playing && !computing ? handleEvent : undefined;
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-surface-primary">
@@ -334,6 +407,8 @@ export default function Home() {
 
             <GameHUD
               round={currentRound}
+              clock={formatClock(clock)}
+              playing={playing}
               onEvent={handleEvent}
               marketOpen={marketOpen}
               boardOpen={boardOpen}
@@ -358,7 +433,17 @@ export default function Home() {
       {/* Right column: board feed, full height */}
       {boardOpen && (
         <aside className="w-[370px] shrink-0 border-l-2 border-black overflow-hidden">
-          <BoardFeed posts={posts} events={events} />
+          <BoardFeed
+            posts={posts}
+            events={events}
+            agents={agents}
+            snsAgents={snsAgents}
+            emotionDeltas={emotionDeltas}
+            currentRound={currentRound}
+            onPost={handlePost}
+            onVote={handleVote}
+            onRequestEvent={requestNextEvent}
+          />
         </aside>
       )}
 

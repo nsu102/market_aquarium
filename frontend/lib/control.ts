@@ -14,6 +14,8 @@ import { Agent } from "@/mock_data/agents";
 import { MarketData } from "@/mock_data/market";
 import { Post } from "@/mock_data/posts";
 import { GameEvent } from "@/mock_data/events";
+import type { Scenario } from "@/lib/timeline";
+import type { RoundReportMeta } from "@/lib/reverieApi";
 
 export const CONTROL_BASE =
   process.env.NEXT_PUBLIC_CONTROL_BASE?.replace(/\/$/, "") ||
@@ -50,10 +52,32 @@ export interface RunResponse {
 /** Impact may arrive as a signed number or a label depending on the engine. */
 export type MarketImpact = number | "positive" | "negative" | "neutral" | string;
 
+/** Full round state returned alongside an event (plan §2: timer replay). */
+export interface RoundStatePayload {
+  round: number;
+  max_rounds: number;
+  finished: boolean;
+  agents: Agent[];
+  sns_agents: Agent[];
+  emotion_deltas: Record<string, Record<string, number>>;
+  market: MarketData;
+  posts: Post[];
+  events: GameEvent[];
+  sectors: string[];
+  scenario: Scenario | null;
+  round_report: RoundReportMeta | null;
+}
+
 export interface MarketEventResponse {
   round: number;
   event: string;
   impact: MarketImpact;
+  // Plan §2: the computed round + scenario + pre/post market snapshots so the
+  // frontend timer can replay the day over ~2 real minutes.
+  state?: RoundStatePayload;
+  start_market?: MarketData | null;
+  final_market?: MarketData | null;
+  error?: string;
 }
 
 export interface MarketStateResponse {
@@ -222,4 +246,56 @@ export function resume(uid: string, sim_code?: string): Promise<ResumeResponse> 
 export function overallReport(uid?: string): Promise<OverallReportResponse> {
   const q = uid ? `?uid=${uid}` : "";
   return getJson<OverallReportResponse>(`/control/report/overall${q}`);
+}
+
+/* ── User board participation (D3/D4) ── */
+
+export interface BoardPostInput {
+  uid?: string;
+  text: string;
+  target_thread_id?: string; // set -> a comment on that thread
+  mention_agent_id?: string; // set -> that agent must reply now
+}
+
+export interface BoardPostResponse {
+  status: string;
+  posts: Post[];
+  agents: Agent[];
+  sns_agents: Agent[];
+  emotion_deltas: Record<string, Record<string, number>>;
+  error?: string;
+}
+
+/** Write a board post (or a comment when target_thread_id is set). A mention
+ * makes the named agent reply immediately and shifts its emotion. */
+export function boardPost(input: BoardPostInput): Promise<BoardPostResponse> {
+  return postJson<BoardPostResponse>("/control/board/post", {
+    uid: input.uid,
+    text: input.text,
+    target_thread_id: input.target_thread_id ?? null,
+    mention_agent_id: input.mention_agent_id ?? null,
+  });
+}
+
+export interface BoardVoteInput {
+  uid?: string;
+  post_id: string;
+  comment_id?: string;
+  dir: "like" | "dislike";
+}
+
+export interface BoardVoteResponse {
+  status: string;
+  posts: Post[];
+  error?: string;
+}
+
+/** Like/dislike a post or comment; counts settle into confidence next round. */
+export function boardVote(input: BoardVoteInput): Promise<BoardVoteResponse> {
+  return postJson<BoardVoteResponse>("/control/board/vote", {
+    uid: input.uid,
+    post_id: input.post_id,
+    comment_id: input.comment_id ?? null,
+    dir: input.dir,
+  });
 }

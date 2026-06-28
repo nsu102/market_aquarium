@@ -24,7 +24,13 @@ _DELTA_MAX = 50.0
 _STATE_MIN = 0.0
 _STATE_MAX = 100.0
 
-_FALLBACK: dict[str, float] = {"fear_delta": 0.0, "greed_delta": 0.0}
+_FALLBACK: dict[str, float] = {
+    "fear_delta": 0.0,
+    "greed_delta": 0.0,
+    "confidence_delta": 0.0,
+    "excitement_delta": 0.0,
+    "trust_delta": 0.0,
+}
 
 _SYSTEM = (
     "You are simulating one investor's emotional reaction inside a market "
@@ -54,14 +60,24 @@ def _ask_delta(client: LLMClient, persona: str, stimulus: str) -> EmotionDelta:
         f"{persona}\n\n"
         f"{stimulus}\n\n"
         "Given this investor's personality and current emotional state, how do "
-        "their fear and greed change in reaction? A negative delta lowers the "
+        "their FIVE emotion axes move in reaction? A negative delta lowers the "
         "value, a positive delta raises it. Stay in roughly the range -30 to 30.\n"
-        'Respond with JSON only: {"fear_delta": number, "greed_delta": number}'
+        "- fear (두려움): danger/loss raises it\n"
+        "- greed (탐욕): profit opportunity raises it\n"
+        "- confidence (자신감↔위축): feeling validated/right raises it, being wrong lowers it\n"
+        "- excitement (흥분↔침착): hype, volatility, big moves raise it; boring/clear news lowers it\n"
+        "- trust (신뢰↔의심): credible/official news raises it, rumors/uncertainty lower it\n"
+        'Respond with JSON only: {"fear_delta": number, "greed_delta": number, '
+        '"confidence_delta": number, "excitement_delta": number, "trust_delta": number}'
     )
     data = safe_json(client, user, fallback=_FALLBACK, system=_SYSTEM)
-    fear_delta = _clamp(_as_float(data.get("fear_delta"), 0.0), _DELTA_MIN, _DELTA_MAX)
-    greed_delta = _clamp(_as_float(data.get("greed_delta"), 0.0), _DELTA_MIN, _DELTA_MAX)
-    return EmotionDelta(fear_delta=fear_delta, greed_delta=greed_delta)
+    return EmotionDelta(
+        fear_delta=_clamp(_as_float(data.get("fear_delta"), 0.0), _DELTA_MIN, _DELTA_MAX),
+        greed_delta=_clamp(_as_float(data.get("greed_delta"), 0.0), _DELTA_MIN, _DELTA_MAX),
+        confidence_delta=_clamp(_as_float(data.get("confidence_delta"), 0.0), _DELTA_MIN, _DELTA_MAX),
+        excitement_delta=_clamp(_as_float(data.get("excitement_delta"), 0.0), _DELTA_MIN, _DELTA_MAX),
+        trust_delta=_clamp(_as_float(data.get("trust_delta"), 0.0), _DELTA_MIN, _DELTA_MAX),
+    )
 
 
 def _as_float(value: object, default: float) -> float:
@@ -92,6 +108,31 @@ def generate_emotion_delta_from_text(
 
 
 def apply_emotion_delta(agent: Agent, delta: EmotionDelta) -> None:
-    """Apply ``delta`` to the agent in place, clamping fear/greed to [0, 100]."""
+    """Apply ``delta`` to the agent in place, clamping every axis to [0, 100]."""
     agent.fear = _clamp(agent.fear + delta.fear_delta, _STATE_MIN, _STATE_MAX)
     agent.greed = _clamp(agent.greed + delta.greed_delta, _STATE_MIN, _STATE_MAX)
+    agent.confidence = _clamp(agent.confidence + delta.confidence_delta, _STATE_MIN, _STATE_MAX)
+    agent.excitement = _clamp(agent.excitement + delta.excitement_delta, _STATE_MIN, _STATE_MAX)
+    agent.trust = _clamp(agent.trust + delta.trust_delta, _STATE_MIN, _STATE_MAX)
+
+
+# Each net (like − dislike) point on an agent's own posts/comments moves their
+# confidence axis by this much (D3: 좋아요−싫어요 → 자신감↔위축). Capped so a
+# viral thread cannot saturate the axis in a single round.
+_VOTE_CONFIDENCE_PER_POINT = 2.5
+_VOTE_CONFIDENCE_CAP = 30.0
+
+
+def apply_vote_emotion(agent: Agent, net_votes: int) -> None:
+    """Round-end settlement: net likes raise confidence, net dislikes lower it.
+
+    A small spillover also nudges greed (validation emboldens) / fear (rejection
+    unsettles) so the social feedback is felt in the price-bearing axes too.
+    """
+    shift = _clamp(net_votes * _VOTE_CONFIDENCE_PER_POINT, -_VOTE_CONFIDENCE_CAP, _VOTE_CONFIDENCE_CAP)
+    agent.confidence = _clamp(agent.confidence + shift, _STATE_MIN, _STATE_MAX)
+    spill = shift * 0.3
+    if shift >= 0:
+        agent.greed = _clamp(agent.greed + spill, _STATE_MIN, _STATE_MAX)
+    else:
+        agent.fear = _clamp(agent.fear - spill, _STATE_MIN, _STATE_MAX)

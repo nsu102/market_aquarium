@@ -277,9 +277,15 @@ def _persona_post(text: str) -> str:
 def scripted_client() -> "FakeLLM":
     def handler(user: str, system: str | None) -> str:
         if "fear_delta" in user:
+            rumor = "rumor" in user.lower() or "루머" in user
+            trust_d = -7 if rumor else 5
             if _is_negative(user):
-                return json.dumps({"fear_delta": 9, "greed_delta": -4})
-            return json.dumps({"fear_delta": -4, "greed_delta": 8})
+                return json.dumps({"fear_delta": 9, "greed_delta": -4,
+                                   "confidence_delta": -5, "excitement_delta": 7,
+                                   "trust_delta": trust_d})
+            return json.dumps({"fear_delta": -4, "greed_delta": 8,
+                               "confidence_delta": 5, "excitement_delta": 6,
+                               "trust_delta": trust_d})
         if "kind" in user:
             # Reactive personas COMMENT on others' posts (populates comment
             # threads); the rest POST their own. If no thread exists yet, the SNS
