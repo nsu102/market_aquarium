@@ -45,8 +45,8 @@ function emotionOf(agent: Agent): { Icon: LucideIcon; color: string; label: stri
  */
 export default function AgentSidebar({ agents, alerts, onSelect }: Props) {
   return (
-    <div className="space-y-px">
-      <span className="inline-block bg-black/60 rounded-sm px-1 text-[10px] font-bold tracking-[0.16em] text-white/90">
+    <div className="space-y-1.5">
+      <span className="inline-block bg-black/60 rounded px-1.5 text-[11px] font-bold tracking-[0.16em] text-white/90">
         콜로니 — {agents.length}
       </span>
       {agents.map((agent) => {
@@ -61,25 +61,25 @@ export default function AgentSidebar({ agents, alerts, onSelect }: Props) {
           <button
             key={agent.id}
             onClick={() => onSelect(agent)}
-            className="w-full flex items-center gap-2 px-1 py-0.5 rounded cursor-pointer text-left"
+            className="w-full flex items-center gap-2.5 px-1 py-1 rounded cursor-pointer text-left"
             title={`${agent.alias} · ${agent.type}`}
           >
             <div
-              className={`w-7 h-7 shrink-0 flex items-center justify-center rounded-full border-2 shadow-[0_1px_3px_rgba(0,0,0,0.6)] ${
+              className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-full border-2 shadow-[0_1px_3px_rgba(0,0,0,0.6)] ${
                 trade ? "border-[#78F142] ring-2 ring-[#78F142]/50" : "border-black/40"
               }`}
               style={{ background: agent.color }}
             >
-              <Avatar size={15} className="text-black" />
+              <Avatar size={22} className="text-black" />
             </div>
-            <div className="flex flex-col items-start gap-px min-w-0 leading-tight">
+            <div className="flex flex-col items-start gap-1 min-w-0 leading-tight">
               {/* name + emotion icon share one tight black highlight (no box) */}
-              <span className="inline-flex items-center gap-1 max-w-full bg-black/60 rounded-sm px-1 py-px">
-                <span className="text-[12px] font-bold text-white truncate">{agent.alias}</span>
-                <StatusIcon size={12} style={{ color: statusColor }} className="shrink-0" />
+              <span className="inline-flex items-center gap-1.5 max-w-full bg-black/60 rounded px-1.5 py-0.5">
+                <span className="text-[14px] font-bold text-white truncate">{agent.alias}</span>
+                <StatusIcon size={15} style={{ color: statusColor }} className="shrink-0" />
               </span>
               <span
-                className="inline-block max-w-full truncate bg-black/60 rounded-sm px-1 text-[10px] font-semibold"
+                className="inline-block max-w-full truncate bg-black/60 rounded px-1.5 py-0.5 text-[12px] font-semibold"
                 style={{ color: trade ? statusColor : "#FFFFFF" }}
               >
                 {trade ? trade.label : agent.lastAction}
