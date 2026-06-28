@@ -283,16 +283,19 @@ class Live:
             self.walk_idle[orig] = self._walk_rng.randint(4, 14)
         return nxt
 
-    def build_timeline(self):
-        """Choreograph this round's actions into per-agent home->...->home paths."""
-        # Start this round's timeline at the frontend's current step so it
-        # continues seamlessly (the frontend never rewinds its step counter).
+    def build_timeline(self, actions_override: dict | None = None):
+        """Choreograph this round's actions into per-agent home->...->home paths.
+
+        When ``actions_override`` is provided (e.g. empty dict for a pre-build
+        before round results are ready), use those instead of last_round_actions.
+        """
         self.base = self.last_poll_step
-        # Absolute step at which each agent ARRIVES at the board/exchange this
-        # round, so posts/trades reveal as agents arrive (not all up front).
         self.board_arrival: dict[str, int] = {}
         self.exchange_arrival: dict[str, int] = {}
-        actions = {a["agent_id"]: a for a in self.game.last_round_actions}
+        if actions_override is not None:
+            actions = actions_override
+        else:
+            actions = {a["agent_id"]: a for a in self.game.last_round_actions}
         rng = random.Random(self.game.seed + self.game.round)
 
         per_agent_frames: dict[str, list] = {}
@@ -715,6 +718,18 @@ def control_market_event(body: EventBody):
 
     def _run_background():
         try:
+            # Build timeline immediately with placeholder actions so movement
+            # starts right away. Labels update when the round finishes.
+            placeholder = {ag.id: {
+                "agent_id": ag.id, "alias": ag.alias,
+                "posted": False, "trade_action": "HOLD",
+            } for ag in game.agents}
+            try:
+                live.build_timeline(actions_override=placeholder)
+                live._progress_queue.append({"phase": "timeline_ready"})
+            except Exception as e:
+                print(f"[WARN] pre-build timeline: {e}")
+
             def _on_progress(phase, snapshot):
                 live._progress_queue.append({"phase": phase, **snapshot})
 
@@ -725,11 +740,11 @@ def control_market_event(body: EventBody):
             _st = game.state()
             live.final_market = _st["market"]
             live.final_prices = {a["symbol"]: a["price"] for a in _st["market"]["assets"]}
+            # Rebuild timeline with real actions (labels update)
             try:
                 live.build_timeline()
-                live._progress_queue.append({"phase": "timeline_ready"})
             except Exception as e:
-                print(f"[WARN] build_timeline failed: {e}")
+                print(f"[WARN] rebuild timeline: {e}")
             # Push final state
             live._progress_queue.append({
                 "phase": "done",
