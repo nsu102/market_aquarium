@@ -17,6 +17,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  
 }
 
 /* 게임 픽셀 에셋(스프라이트/맵)만 또렷하게 — 일반 img는 부드럽게 */
@@ -52,6 +53,12 @@ img[src*="/assets/"] { image-rendering: pixelated; }
 .animate-pulse-soft { animation: pulse-soft 1.4s ease-in-out infinite; }
 .animate-slide-up { animation: slide-up 0.16s ease-out; }
 .animate-bump { animation: bump 0.45s ease-out; }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
 
 /* ── 유틸 (블랙 테두리/솔리드 섀도우) ── */
 .pixel-border { border: 2px solid #161616; }

@@ -72,6 +72,15 @@ export default function AssetTicker({ assets, onSelect }: Props) {
               className="flex items-center gap-2 shrink-0 w-[172px] h-[68px] overflow-hidden border-2 border-black rounded-xl bg-white px-2.5 tabular-nums cursor-pointer hover:bg-pixel-path active:translate-x-[1px] active:translate-y-[1px]"
             >
               {/* name / price / change stacked so change% never overlaps the chart */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`https://assets.coincap.io/assets/icons/${a.symbol.toLowerCase()}@2x.png`}
+                alt={a.symbol}
+                width={24}
+                height={24}
+                className="shrink-0 rounded-full"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
               <div className="flex-1 min-w-0 flex flex-col justify-center leading-tight text-left">
                 <div className="text-[11px] font-bold text-black truncate">
                   {a.name || a.symbol}

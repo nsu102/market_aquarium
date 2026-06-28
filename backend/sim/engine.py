@@ -33,7 +33,7 @@ from .models import (
 )
 from .personas import sample_agents, sample_sns_agents
 
-MAX_ROUNDS = 5
+MAX_ROUNDS = 10
 
 # Event impact -> base price shock %, before agent/emotion/order/noise effects (FR-7).
 IMPACT_BASE_PCT = {
@@ -72,7 +72,11 @@ def classify_impact(text: str) -> EventImpact:
     Used only when the caller does not specify an impact. Real impact is shaped
     by agent emotion/trades on top of this.
     """
-    neg = ["해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산", "hack", "crash", "ban", "war"]
+    neg = [
+        "해킹", "폭락", "규제", "관세", "전쟁", "급락", "공포", "파산",
+        "악재", "악제", "장애", "중단", "다운", "소송", "유출",
+        "hack", "crash", "ban", "war", "outage", "halt", "lawsuit",
+    ]
     pos = ["승인", "상승", "호재", "급등", "유입", "인하", "etf", "approval", "surge", "rally"]
     low = text.lower()
     if any(k in text or k in low for k in neg):
@@ -324,6 +328,7 @@ class GameSession:
                 self.agents,
                 trades,
                 seed=self.seed + rnd * 1000 + i,
+                event_text=text,
             )
             price_engine.apply_breakdown(asset, b)
             breakdowns.append(b)

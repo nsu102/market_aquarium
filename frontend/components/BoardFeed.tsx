@@ -13,13 +13,9 @@ import {
   AtSign,
   X,
   Newspaper,
-  Zap,
-  Layers,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
-import { AGENT_PROFILES } from "@/constants/agentProfiles";
+import { getProfileImg } from "@/lib/profileImg";
 
 interface BoardComposeInput {
   text: string;
@@ -41,7 +37,6 @@ export default function BoardFeed({
   currentRound,
   onPost,
   onVote,
-  onRequestEvent,
 }: {
   posts: Post[];
   events?: GameEvent[];
@@ -52,8 +47,6 @@ export default function BoardFeed({
   currentRound?: number;
   onPost?: (input: BoardComposeInput) => void;
   onVote?: (input: BoardVoteInput) => void;
-  /** Between rounds (round 2+): submit the next event from the board-top card. */
-  onRequestEvent?: (text: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // post id -> comment count last seen by the user (for the "new comment" 느낌표).
@@ -137,7 +130,6 @@ export default function BoardFeed({
         posts={posts}
         latestEvent={latestEvent}
         priorEvents={priorEvents}
-        currentRound={currentRound}
         expanded={expanded}
         toggleExpand={toggleExpand}
         hasNewComments={hasNewComments}
@@ -147,7 +139,6 @@ export default function BoardFeed({
         snsAgents={snsAgents}
         onVote={onVote}
         onPost={onPost}
-        onRequestEvent={onRequestEvent}
       />
     </div>
   );
@@ -158,7 +149,6 @@ function FeedTab({
   posts,
   latestEvent,
   priorEvents,
-  currentRound,
   expanded,
   toggleExpand,
   hasNewComments,
@@ -168,12 +158,10 @@ function FeedTab({
   snsAgents,
   onVote,
   onPost,
-  onRequestEvent,
 }: {
   posts: Post[];
   latestEvent: GameEvent | null;
   priorEvents: GameEvent[];
-  currentRound?: number;
   expanded: Set<string>;
   toggleExpand: (id: string, n: number) => void;
   hasNewComments: (p: Post) => boolean;
@@ -183,17 +171,11 @@ function FeedTab({
   snsAgents: Agent[];
   onVote?: (input: BoardVoteInput) => void;
   onPost?: (input: BoardComposeInput) => void;
-  onRequestEvent?: (text: string) => void;
 }) {
   const mentionList = useMemo(() => [...agents, ...snsAgents], [agents, snsAgents]);
-  const [showPrev, setShowPrev] = useState(false);
 
-  // Split into the current round (expanded) and earlier rounds (collapsed to a
-  // thin bar). User posts ride with whatever round they were written in.
-  const maxRound =
-    currentRound ?? posts.reduce((m, p) => Math.max(m, p.round), 1);
-  const currentPosts = posts.filter((p) => p.round >= maxRound);
-  const prevPosts = posts.filter((p) => p.round < maxRound);
+  // All posts, newest first
+  const sorted = useMemo(() => [...posts].reverse(), [posts]);
 
   const renderCard = (post: Post) => (
     <PostCard
@@ -213,12 +195,7 @@ function FeedTab({
   return (
     <>
       <div className="flex-1 overflow-y-auto bg-pixel-wall px-3">
-        {/* 다음 이벤트 카드 (라운드 종료 후 깜짝 등장, 라운드 2+) */}
-        {onRequestEvent && (
-          <NextEventCard round={maxRound + 1} onSubmit={onRequestEvent} />
-        )}
-
-        {/* News card (감정 라벨 없이 뉴스 형태로만 표시) */}
+        {/* News card */}
         {latestEvent && (
           <div className="pt-3">
             <div className="border-2 border-black rounded-2xl bg-white overflow-hidden shadow-pixel-sm">
@@ -246,28 +223,8 @@ function FeedTab({
           </div>
         )}
 
-        {/* 이전 라운드들 — 한 줄 얇은 바로 접어두고 펼쳐서 보기 */}
-        {prevPosts.length > 0 && (
-          <div className="pt-3">
-            <button
-              onClick={() => setShowPrev((v) => !v)}
-              aria-expanded={showPrev}
-              className="w-full flex items-center gap-2 px-3 py-1.5 bg-white border-2 border-black rounded-full shadow-pixel-sm text-[11px] font-bold text-pixel-muted hover:bg-pixel-path cursor-pointer"
-            >
-              <Layers size={13} className="text-black shrink-0" />
-              <span className="text-black">이전 라운드</span>
-              <span className="text-pixel-muted">글 {prevPosts.length}개</span>
-              <span className="ml-auto flex items-center gap-1 text-black">
-                {showPrev ? "접기" : "펼쳐보기"}
-                {showPrev ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-              </span>
-            </button>
-            {showPrev && <div className="mt-1">{prevPosts.map(renderCard)}</div>}
-          </div>
-        )}
-
-        {/* 현재 라운드 글 */}
-        {currentPosts.map(renderCard)}
+        {/* All posts, newest on top */}
+        {sorted.map(renderCard)}
         <div className="h-3" />
       </div>
 
@@ -277,56 +234,6 @@ function FeedTab({
   );
 }
 
-/* ── 다음 이벤트 카드 (게시판 맨 위, 깜짝 등장) ── */
-function NextEventCard({
-  round,
-  onSubmit,
-}: {
-  round: number;
-  onSubmit: (text: string) => void;
-}) {
-  const [text, setText] = useState("");
-  const submit = () => {
-    if (!text.trim()) return;
-    onSubmit(text.trim());
-    setText("");
-  };
-  return (
-    <div className="pt-3 animate-slide-up">
-      <div className="border-2 border-pixel-greenText rounded-2xl bg-white overflow-hidden shadow-pixel-md">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b-2 border-pixel-greenText bg-pixel-grass">
-          <Zap size={14} className="text-black" strokeWidth={2.4} />
-          <span className="text-[10px] font-extrabold text-black tracking-wide">
-            R{round} 새 이벤트
-          </span>
-        </div>
-        <div className="px-3 py-2.5">
-          <p className="text-[11px] text-pixel-muted mb-2 leading-relaxed">
-            다음 하루에 던질 뉴스를 입력하세요.
-          </p>
-          <div className="flex gap-1.5">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="새 이벤트..."
-              autoFocus
-              className="flex-1 min-w-0 bg-white border-2 border-black rounded-lg px-2.5 h-8 text-[12px] text-black placeholder:text-pixel-muted focus:outline-none focus:bg-pixel-path"
-            />
-            <button
-              onClick={submit}
-              disabled={!text.trim()}
-              aria-label="이벤트 전송"
-              className="w-8 h-8 shrink-0 bg-pixel-grass border-2 border-black rounded-lg text-black flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:translate-y-[1px]"
-            >
-              <Send size={13} />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function PostCard({
   post,
@@ -351,6 +258,7 @@ function PostCard({
 }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const Icon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
+  const profileSrc = getProfileImg(post.agentId);
   const isUser = post.is_user;
 
   return (
@@ -363,7 +271,11 @@ function PostCard({
         {/* Author row */}
         <div className="flex items-center gap-2.5 mb-2">
           <div className="w-9 h-9 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center text-black overflow-hidden">
-            <Icon size={16} />
+            {profileSrc ? (
+              <img src={profileSrc} alt={post.agentAlias} className="w-full h-full object-cover" />
+            ) : (
+              <Icon size={16} />
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-bold text-black leading-tight flex items-center gap-1">
@@ -456,21 +368,26 @@ function PostCard({
             ) : (
               post.comments.map((c, i) => {
                 const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
+                const cProfile = getProfileImg(c.agentId);
                 return (
                   <div key={c.id || i} className="flex items-start gap-2">
-                    <div className="w-6 h-6 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center flex-shrink-0 mt-0.5 text-black">
-                      <CIcon size={11} />
+                    <div className="w-6 h-6 rounded-full border-2 border-black bg-pixel-wall flex items-center justify-center flex-shrink-0 mt-0.5 text-black overflow-hidden">
+                      {cProfile ? (
+                        <img src={cProfile} alt={c.agentAlias} className="w-full h-full object-cover" />
+                      ) : (
+                        <CIcon size={11} />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0 bg-pixel-wall rounded-2xl rounded-tl-md px-2.5 py-1.5">
-                      <span className="text-[11px] font-bold text-black">
-                        {c.agentAlias}
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <span className="text-[11px] font-bold text-black leading-tight">{c.agentAlias}</span>
                         {c.is_user && (
-                          <span className="ml-1 text-[8px] px-1 py-[1px] rounded-full bg-pixel-grass border border-black">
+                          <span className="text-[8px] px-1 py-[1px] rounded-full bg-pixel-grass border border-black font-bold">
                             나
                           </span>
                         )}
-                      </span>
-                      <p className="text-[11px] text-pixel-muted leading-[1.5] mt-0.5">{c.content}</p>
+                      </div>
+                      <p className="text-[11px] text-pixel-muted leading-[1.5]">{c.content}</p>
                       {/* comment like/dislike */}
                       <div className="flex items-center gap-3 mt-1 text-pixel-muted">
                         <button

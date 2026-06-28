@@ -62,12 +62,28 @@ sys.path.insert(0, _REPO)
 # the_ville location mapping (use existing places).
 # --------------------------------------------------------------------------- #
 BOARD_TILE = (32, 45)  # 게시판
-BOARD_ADDR = "the Ville:artist's co-living space:common room:common room table"  # 게시판 (커뮤니티 보드)
-EXCHANGE_ADDR = "the Ville:Harvey Oak Supply Store:supply store:supply store counter"  # 거래소
-CAFE_ADDR = "the Ville:The Willows Market and Pharmacy:store:grocery store counter"  # 카페
-# ponytail: wandering destinations — just the main spots + homes
+BOARD_ADDR = "the Ville:artist's co-living space:common room"  # 게시판 (커뮤니티 보드) — arena level for spread
+EXCHANGE_ADDR = "the Ville:Harvey Oak Supply Store:supply store"  # 거래소 — arena level (164 tiles, whole floor)
+CAFE_ADDR = "the Ville:Hobbs Cafe:cafe"  # 카페
+# Keep trade reveals near the exchange while avoiding every agent stacking on
+# the same destination tile.
+EXCHANGE_OFFSETS = [
+    (0, 0),
+    (-1, 0), (1, 0), (0, -1), (0, 1),
+    (-2, 0), (2, 0), (-1, -1), (1, -1), (-1, 1), (1, 1),
+    (-2, -1), (2, -1), (-2, 1), (2, 1),
+    (0, -2), (0, 2),
+]
+
+# generative_agents-style daily spots: agents visit these between main stops
+# (board, exchange) so each day feels lived-in, not just a trade loop.
 DAILY_SPOTS = [
-    ("cafe", CAFE_ADDR),
+    ("공원에서 산책", "the Ville:Johnson Park"),
+    ("도서관에서 자료 조사", "the Ville:Oak Hill College"),
+    ("펍에서 한 잔", "the Ville:The Rose and Crown Pub"),
+    ("공용 공간에서 잡담", "the Ville:artist's co-living space:common room"),
+    ("마트 구경", "the Ville:The Willows Market and Pharmacy"),
+    ("카페에서 커피 한 잔", "the Ville:Hobbs Cafe"),
 ]
 
 FORK_ENV0 = join(
@@ -82,6 +98,14 @@ TRADE_LABEL = {
     "BUY_LARGE": "거래소에서 대량매수",
     "HOLD": "거래소에서 관망",
 }
+
+
+def _stable_int(text: str) -> int:
+    acc = 2166136261
+    for ch in text:
+        acc ^= ord(ch)
+        acc = (acc * 16777619) & 0xFFFFFFFF
+    return acc
 
 # --------------------------------------------------------------------------- #
 # App + shared state
@@ -169,10 +193,40 @@ class Live:
 
     # -- timeline building ------------------------------------------------- #
     def _tile_for(self, address: str):
+        """First tile for a fixed destination (deterministic)."""
         tiles = _maze().address_tiles.get(address)
         if not tiles:
             return None
         return sorted(tiles)[0]
+
+    def _rand_tile_for(self, address: str, rng: random.Random):
+        """Random tile within a building/area — generative_agents-style spread so
+        agents don't all converge on a single counter tile."""
+        tiles = _maze().address_tiles.get(address)
+        if not tiles:
+            return None
+        return rng.choice(sorted(tiles))
+
+    def _walkable(self, tile) -> bool:
+        if tile is None:
+            return False
+        x, y = tile
+        try:
+            return str(_maze().collision_maze[y][x]) != str(collision_block_id)
+        except Exception:
+            return False
+
+    def _exchange_spread_tile(self, anchor, rng: random.Random):
+        """Pick a tile around the exchange anchor within a small x/y spread."""
+        if anchor is None:
+            return None
+        local = [(anchor[0] + dx, anchor[1] + dy) for dx, dy in EXCHANGE_OFFSETS]
+        arena = sorted(_maze().address_tiles.get(EXCHANGE_ADDR, []))
+        candidates = [t for t in dict.fromkeys(local + arena) if self._walkable(t)]
+        if not candidates:
+            return anchor
+        rng.shuffle(candidates)
+        return candidates[0]
 
     def _path(self, a, b):
         if a is None or b is None:
@@ -185,15 +239,16 @@ class Live:
 
     # -- random wandering (map life, decoupled from the board) -------------- #
     def _dest_pool(self) -> list:
-        """Candidate destination tiles agents wander between: the real the_ville
-        places (board, exchange, daily-life spots) plus every home, so the map
-        always has lively, purposeful-looking movement."""
+        """Candidate destination tiles agents wander between: buildings
+        (multiple tiles each) plus every home, for lively movement."""
         if self._dest_tiles is None:
             pool = []
-            for addr in [BOARD_ADDR, EXCHANGE_ADDR] + [a for _, a in DAILY_SPOTS]:
-                t = self._tile_for(addr)
-                if t:
-                    pool.append(t)
+            addrs = [BOARD_ADDR, EXCHANGE_ADDR] + [a for _, a in DAILY_SPOTS]
+            for addr in addrs:
+                tiles = _maze().address_tiles.get(addr)
+                if tiles:
+                    s = sorted(tiles)
+                    pool.extend(s[::max(1, len(s) // 4)][:4])
             pool += [p["home"] for p in self.persona if p["home"]]
             self._dest_tiles = pool or [(62, 70)]
         return self._dest_tiles
@@ -229,18 +284,16 @@ class Live:
         self.exchange_arrival: dict[str, int] = {}
         actions = {a["agent_id"]: a for a in self.game.last_round_actions}
         rng = random.Random(self.game.seed + self.game.round)
-        board_t = BOARD_TILE
-        exch_t = self._tile_for(EXCHANGE_ADDR)
-        cafe_t = self._tile_for(CAFE_ADDR)
 
         per_agent_frames: dict[str, list] = {}
         for p in self.persona:
             ag = p["agent"]
             act = actions.get(ag.id, {})
             home = p["home"]
-            # Per-agent RNG for staggered timing.
-            arng = random.Random((hash(ag.id) & 0xFFFFFFFF) ^ (self.game.round * 2654435761))
-            start_delay = arng.randint(0, 40)
+            # Per-agent RNG — generative_agents-style staggered timing so
+            # each persona walks a different route at a different pace.
+            arng = random.Random(_stable_int(ag.id) ^ (self.game.round * 2654435761))
+            start_delay = arng.randint(0, 60)
             board_label = "게시판에 글 작성" if act.get("posted") else "게시판에서 분위기 확인"
             trade_action = act.get("trade_action", "HOLD")
             exch_label = TRADE_LABEL.get(trade_action, "거래소에서 관망")
@@ -256,20 +309,26 @@ class Live:
                 }, ensure_ascii=False)
                 exch_label = f"{exch_label}||{trade_info}"
 
-            # 집 → 게시판 → 거래소 → 카페 → (거래소/카페 추가 방문) → 집
+            # generative_agents-style daily plan: pick 2 random daily-life
+            # spots (different per agent) to visit between the main stops.
+            spots = arng.sample(DAILY_SPOTS, min(2, len(DAILY_SPOTS)))
+
+            # Random tiles within buildings so agents spread out naturally
+            board_t_a = self._rand_tile_for(BOARD_ADDR, arng) or BOARD_TILE
+            exch_anchor = self._tile_for(EXCHANGE_ADDR)
+            exch_t_a = self._exchange_spread_tile(exch_anchor, arng) or home
+            spot_tiles = [(self._rand_tile_for(a, arng) or home, l) for l, a in spots]
+
+            # 집 → (daily spot 1) → 게시판 → (daily spot 2) → 거래소 → 집
             waypoints = [
                 (home, "집에서 하루 계획"),
-                (board_t or home, board_label),
-                (exch_t or home, exch_label),
-                (cafe_t or home, "카페에서 휴식"),
             ]
-            # 거래소/카페 추가 방문 (1~2회)
-            extra_visits = arng.randint(1, 2)
-            for _ in range(extra_visits):
-                if arng.random() < 0.5:
-                    waypoints.append((exch_t or home, "거래소 재방문"))
-                else:
-                    waypoints.append((cafe_t or home, "카페 재방문"))
+            if spot_tiles:
+                waypoints.append((spot_tiles[0][0], spot_tiles[0][1]))
+            waypoints.append((board_t_a, board_label))
+            if len(spot_tiles) > 1:
+                waypoints.append((spot_tiles[1][0], spot_tiles[1][1]))
+            waypoints.append((exch_t_a, exch_label))
             waypoints.append((home, "집으로 귀가"))
 
             frames = [(home[0], home[1], "집에서 하루 계획") for _ in range(1 + start_delay)]
@@ -279,9 +338,10 @@ class Live:
                 label = waypoints[i][1]
                 for t in seg[1:]:
                     frames.append((t[0], t[1], label))
-                if i == 1:  # board
+                # Record arrival step by label (position varies per agent)
+                if label == board_label:
                     self.board_arrival[ag.id] = self.base + len(frames) - 1
-                elif i == 2:  # exchange
+                elif label == exch_label:
                     self.exchange_arrival[ag.id] = self.base + len(frames) - 1
                 for _ in range(arng.randint(6, 20)):
                     frames.append((wx, wy, label))
@@ -401,13 +461,21 @@ class Live:
                     visible_posts.append(post)
             elif self.board_arrival.get(aid, 10**9) <= step:
                 visible_posts.append(post)
+        visible_agents = []
+        for ag in st["agents"]:
+            aid = ag.get("id")
+            a2 = dict(ag)
+            if self.exchange_arrival.get(aid, 10**9) > step:
+                a2["lastAction"] = "HOLD"
+                a2["bubble"] = ""
+            visible_agents.append(a2)
         meta = {
             "curr_time": f"Day {self.game.round}",
             "round": self.game.round,
             "market": market,
             "posts": visible_posts,
             "events": st["events"],
-            "agents": st["agents"],
+            "agents": visible_agents,
             "plans": st.get("plans", []),
             "round_report": st.get("round_report"),
             "finished": st.get("finished", False),
@@ -429,10 +497,11 @@ def load_assets_from_artifact(artifact: dict) -> list[Asset]:
     out = []
     for a in artifact.get("assets", []):
         price = float(a.get("price") or 0.0)
+        from sim.assets import _synth_history
         out.append(Asset(
             symbol=a["symbol"], name=a.get("name", a["symbol"]),
             price=price, change24h=float(a.get("change24h") or 0.0),
-            volume=float(a.get("volume") or 0.0), priceHistory=[price],
+            volume=float(a.get("volume") or 0.0), priceHistory=_synth_history(price, a.get("symbol", "")),
             sector=a.get("sector", ""),
         ))
     return out

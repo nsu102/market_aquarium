@@ -12,6 +12,7 @@ import AgentDetail from "@/components/AgentDetail";
 import EventOverlay from "@/components/EventOverlay";
 import SetupScreen from "@/components/SetupScreen";
 import GameHUD from "@/components/GameHUD";
+import ActivityLog, { type LogEntry } from "@/components/ActivityLog";
 import { Agent } from "@/mock_data/agents";
 import { Asset, MarketData } from "@/mock_data/market";
 import { Post } from "@/mock_data/posts";
@@ -79,7 +80,7 @@ export default function Home() {
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
   // True while a round is being computed on the backend (LLM, ~10-30s).
   const [computing, setComputing] = useState(false);
-  const [needEvent, setNeedEvent] = useState(true); // force event input open at round start
+  const [needEvent, setNeedEvent] = useState(false); // opens after loading completes
   // Live reverie sim code, set once fork + run resolve.
   const [canonicalSim, setCanonicalSim] = useState<string | null>(null);
   // Per-user session UID from the backend (MongoDB).
@@ -91,11 +92,24 @@ export default function Home() {
     achievements: control.OverallAchievement[];
   } | null>(null);
   const overallFetchedRef = useRef(false);
+  const [gameFinished, setGameFinished] = useState(false);
+  const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
+  const logIdRef = useRef(0);
+  const prevPostCountRef = useRef(0);
 
   // --- Cosmetic day clock (UI only, does not drive data) ---
   const [clock, setClock] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // True when user presses "정지" — freezes both the cosmetic timer AND the game loop.
+  const [gamePaused, setGamePaused] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const pushLog = useCallback((text: string) => {
+    const id = `log-${++logIdRef.current}`;
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+    setActivityLog((prev) => [...prev.slice(-99), { id, time, text }]);
+  }, []);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -172,6 +186,7 @@ export default function Home() {
               prev ? { ...prev, assets: backendAssets } : prev
             );
           }
+          // Game loaded — user clicks "이벤트" button to start a round
         })
         .catch((err) => {
           console.warn("[MarketAquarium] canonical start failed:", err);
@@ -221,28 +236,29 @@ export default function Home() {
   /** Canonical movement-update tick: drive panels from meta.market/posts/round. */
   const handleTick = useCallback((meta: ReverieMeta) => {
     if (meta.market) setMarketData(meta.market);
-    if (meta.posts) setPosts(meta.posts);
+    if (meta.posts) {
+      // Generate log entries for new posts
+      const newPosts = meta.posts.slice(prevPostCountRef.current);
+      for (const p of newPosts) {
+        pushLog(`${p.agentAlias}가 게시판에 글을 남겼습니다`);
+      }
+      prevPostCountRef.current = meta.posts.length;
+      setPosts(meta.posts);
+    }
     if (meta.events) setEvents(meta.events);
     if (typeof meta.round === "number") setCurrentRound(meta.round);
     if (meta.agents && meta.agents.length) {
-      setAgents((prev) => {
-        // sfx: play trade sound only when an agent's lastAction CHANGES to a trade
-        const prevMap = new Map(prev.map((a) => [a.id, a.lastAction]));
-        const newTrade = meta.agents!.some((a: Agent) => {
-          const old = prevMap.get(a.id);
-          return old !== a.lastAction && (a.lastAction === "BUY" || a.lastAction === "SELL" || a.lastAction === "BUY_LARGE");
-        });
-        if (newTrade) sfxTrade();
-        return meta.agents!;
-      });
+      setAgents(meta.agents);
     }
     if (meta.round_report) setRoundReport(meta.round_report);
     // Extract board-specific data when available
     if ((meta as any).sns_agents) setSnsAgents((meta as any).sns_agents);
     if ((meta as any).emotion_deltas) setEmotionDeltas((meta as any).emotion_deltas);
-    // FR-9: at the end of 5 rounds, fetch + show the overall report once.
+    // Game finished — fetch overall report once.
     if (meta.finished && !overallFetchedRef.current) {
       overallFetchedRef.current = true;
+      setGameFinished(true);
+      pushLog("게임이 종료되었습니다. 종합 리포트를 확인하세요.");
       control
         .overallReport(sessionUid ?? undefined)
         .then((r) => {
@@ -250,11 +266,13 @@ export default function Home() {
         })
         .catch((err) => console.warn("[MarketAquarium] overall report:", err));
     }
-  }, [sessionUid]);
+  }, [sessionUid, pushLog]);
 
   const handleEvent = useCallback((text: string) => {
+    if (gameFinished) return;
     setNeedEvent(false);
     setComputing(true);
+    pushLog(`이벤트 발생: ${text}`);
     control
       .marketEvent({ uid: sessionUid ?? undefined, text, is_rumor: false })
       .then((res) => {
@@ -280,7 +298,7 @@ export default function Home() {
         setActiveEvent({ text, impact: "neutral", source: "user" });
       })
       .finally(() => setComputing(false));
-  }, [sessionUid, startTimer]);
+  }, [sessionUid, startTimer, gameFinished, pushLog]);
 
   // D4: like/dislike a post or comment.
   const handleVote = useCallback(
@@ -315,6 +333,16 @@ export default function Home() {
     setReportOpen((prev) => !prev);
   }, []);
 
+  const handleGamePause = useCallback(() => {
+    setGamePaused(true);
+    stopTimer();
+    setPlaying(false);
+  }, [stopTimer]);
+
+  const handleGameResume = useCallback(() => {
+    setGamePaused(false);
+  }, []);
+
   const handleZoomIn = useCallback(() => {
     reverieControlsRef.current?.zoomIn();
   }, []);
@@ -332,8 +360,9 @@ export default function Home() {
     stopTimer();
     setPlaying(false);
     setReportOpen(true);
-    setNeedEvent(true);
-  }, [stopTimer]);
+    pushLog(`라운드 ${_round} 종료`);
+    if (!gameFinished) setNeedEvent(true);
+  }, [stopTimer, gameFinished, pushLog]);
 
   /** Click a character on the map -> open its detail (portfolio composition). */
   const handleSelectAgent = useCallback(
@@ -355,6 +384,9 @@ export default function Home() {
         (x) => x.sprite?.includes(underscore) || x.alias === original
       );
       if (!a) return;
+      sfxTrade();
+      const actionLabel = action === "SELL" ? "매도" : "매수";
+      pushLog(`${a.alias}가 ${actionLabel}를 실행했습니다`);
       const id = a.id;
       setTradeAlerts((prev) => ({ ...prev, [id]: action }));
       clearTimeout(tradeAlertTimers.current[id]);
@@ -366,7 +398,7 @@ export default function Home() {
         });
       }, 2600);
     },
-    [agents]
+    [agents, pushLog]
   );
 
   if (!gameStarted) {
@@ -399,6 +431,7 @@ export default function Home() {
               onSelectAgent={handleSelectAgent}
               onRoundEnd={handleRoundEnd}
               onAgentTrade={handleAgentTrade}
+              paused={gamePaused}
             />
           ) : (
             <div className="h-full w-full flex items-center justify-center bg-white text-pixel-muted text-sm font-bold animate-pulse-soft">
@@ -416,21 +449,21 @@ export default function Home() {
           <GameHUD
             round={currentRound}
             clock={formatClock(clock)}
-            playing={playing}
+            playing={!gamePaused}
             onEvent={handleEvent}
-            marketOpen={marketOpen}
-            boardOpen={boardOpen}
-            onToggleMarket={() => setMarketOpen(!marketOpen)}
-            onToggleBoard={() => setBoardOpen(!boardOpen)}
             onToggleReport={handleToggleReport}
             reportOpen={reportOpen}
-            marketNotifications={events.length}
-            boardNotifications={posts.length}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onKeyboardEnabled={handleKeyboardEnabled}
-            forceEventOpen={needEvent}
+            onResume={handleGameResume}
+            onStop={handleGamePause}
+            forceEventOpen={needEvent && !gameFinished}
+            onOpenEvent={() => !gameFinished && setNeedEvent(true)}
+            gameFinished={gameFinished}
           />
+
+          <ActivityLog entries={activityLog} />
         </main>
 
         {/* Right column: board feed */}
@@ -470,7 +503,12 @@ export default function Home() {
 
       {/* End-of-game (5 rounds) overall report + achievements */}
       {overall && (
-        <OverallReport report={overall} onClose={() => setOverall(null)} />
+        <OverallReport
+          report={overall}
+          agents={agents}
+          activityLog={activityLog}
+          onClose={() => setOverall(null)}
+        />
       )}
 
       {selectedAgent && (
@@ -489,6 +527,7 @@ export default function Home() {
           onDone={() => setActiveEvent(null)}
         />
       )}
+
     </div>
   );
 }

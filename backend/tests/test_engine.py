@@ -24,6 +24,8 @@ def _session(seed: int = 42) -> GameSession:
 
 def test_classify_impact():
     assert classify_impact("대형 거래소 해킹 소식") == EventImpact.NEGATIVE
+    assert classify_impact("솔라나 악재 발생") == EventImpact.NEGATIVE
+    assert classify_impact("솔라나 악제 발생") == EventImpact.NEGATIVE
     assert classify_impact("비트코인 ETF 승인") == EventImpact.POSITIVE
 
 

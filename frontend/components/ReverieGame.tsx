@@ -73,11 +73,13 @@ interface Props {
   onRoundEnd?: (round: number) => void;
   /** Called on the step a persona reaches the exchange and trades (per-step). */
   onAgentTrade?: (original: string, action: TradeAction) => void;
+  /** When true, the movement polling loop is paused (no new steps fetched). */
+  paused?: boolean;
 }
 
 type LoadPhase = "loading" | "ready" | "down" | "error";
 
-export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelectAgent, onRoundEnd, onAgentTrade }: Props) {
+export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelectAgent, onRoundEnd, onAgentTrade, paused }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onTickRef = useRef(onTick);
   onTickRef.current = onTick;
@@ -87,6 +89,8 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
   onRoundEndRef.current = onRoundEnd;
   const onAgentTradeRef = useRef(onAgentTrade);
   onAgentTradeRef.current = onAgentTrade;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   const personasRef = useRef<GamePersona[]>([]);
   const initialStepRef = useRef(0);
@@ -166,8 +170,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
     // Per-persona trade speech bubble (drawn above the character on the step it
     // reaches the exchange and trades). Hidden until a trade label appears.
     const tradeBubbles: Record<string, Phaser.GameObjects.Container> = {};
-    const tradeBubbleText: Record<string, Phaser.GameObjects.Text> = {};
-    const tradeBubbleGfx: Record<string, Phaser.GameObjects.Graphics> = {};
+    const tradeBubbleGfx: Record<string, Phaser.GameObjects.Image> = {};
     const tradeHideTimers: Record<string, Phaser.Time.TimerEvent> = {};
     // Last movement description seen per persona, so the bubble fires only on the
     // transition INTO a trade label (not on every linger step at the exchange).
@@ -205,6 +208,10 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       this.load.image("CuteRPG_Forest_C", A(`${C}/CuteRPG_Forest_C.png`));
 
       this.load.tilemapTiledJSON("map", A("the_ville/visuals/the_ville_jan7.json"));
+
+      // Trade indicator images
+      this.load.image("trade_green", "/assets/trade_green.png");
+      this.load.image("trade_red", "/assets/trade_red.png");
 
       const atlasJson = A("characters/atlas.json");
       // Generic atlas used for the (invisible) camera "player" sprite.
@@ -272,7 +279,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       // spawn cluster so they are on-screen, and zoom in so characters read at a
       // comfortable size (default zoom 1.0 makes the 32px sprites look tiny).
       player = this.physics.add
-        .sprite(1913, 1849, "atlas", "down")
+        .sprite(1725, 1741, "atlas", "down")
         .setSize(30, 40)
         .setOffset(0, 0);
       player.setVisible(false);
@@ -280,7 +287,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       const camera = this.cameras.main;
       camera.startFollow(player);
       camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-      camera.setZoom(0.5);
+      camera.setZoom(0.35);
       cursors = this.input.keyboard!.createCursorKeys();
       // Don't preventDefault on SPACE/arrows: capturing them would steal the
       // space bar (and arrows) from text inputs like the event-input modal.
@@ -309,7 +316,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
         "wheel",
         (_p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) => {
           const cam = this.cameras.main;
-          cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.4, 1.0));
+          cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.3, 1.0));
         }
       );
 
@@ -346,18 +353,13 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
           .setOrigin(0.5, 1)
           .setDepth(3);
 
-        // Trade speech bubble above the character (hidden until a trade fires).
-        // Sized to its text in showTradeBubble; tail points down at the head.
-        const bubbleGfx = this.add.graphics();
-        const bubbleTxt = this.add
-          .text(0, 0, "", { font: "bold 13px monospace", color: "#1E1A17" })
-          .setOrigin(0.5);
+        // Trade image above the character (hidden until a trade fires).
+        const tradeImg = this.add.image(0, 0, "trade_green").setOrigin(0.5, 1).setScale(0.15);
         tradeBubbles[name] = this.add
-          .container(sprite.body.x + 9, sprite.body.y - 88, [bubbleGfx, bubbleTxt])
+          .container(sprite.body.x + 9, sprite.body.y - 88, [tradeImg])
           .setDepth(5)
           .setVisible(false);
-        tradeBubbleText[name] = bubbleTxt;
-        tradeBubbleGfx[name] = bubbleGfx;
+        tradeBubbleGfx[name] = tradeImg;
       });
 
       // *** BUILDING LABELS ***
@@ -404,9 +406,9 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       if (controlsRef) {
         controlsRef.current = {
           zoomIn: () =>
-            camera.setZoom(Phaser.Math.Clamp(camera.zoom + 0.15, 0.4, 1.0)),
+            camera.setZoom(Phaser.Math.Clamp(camera.zoom + 0.15, 0.3, 1.0)),
           zoomOut: () =>
-            camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.4, 1.0)),
+            camera.setZoom(Phaser.Math.Clamp(camera.zoom - 0.15, 0.3, 1.0)),
           setKeyboardEnabled: (on: boolean) => {
             if (this.input.keyboard) this.input.keyboard.enabled = on;
           },
@@ -414,90 +416,21 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       }
     }
 
-    // Phaser Text trade cards per agent (pixel style)
-    const tradeCardTexts: Record<string, Phaser.GameObjects.Text> = {};
-
-    function showTradeCard(under: string, info: { action: string; symbol: string; qty: number; price: number; cash_after: number }) {
-      const sprite = personaSprites[under];
-      if (!sprite) return;
-      const body = sprite.body as Phaser.Physics.Arcade.Body;
-      const isSell = info.action.includes("SELL");
-      const isLarge = info.action.includes("LARGE");
-      const actionText = isSell ? "매도" : "매수";
-      const bg = isSell ? "#C0564A" : "#327A1C";
-      const label = `${info.symbol} ${actionText}${isLarge ? "!" : ""}`;
-
-      if (!tradeCardTexts[under]) {
-        tradeCardTexts[under] = sceneRef.add
-          .text(body.x, body.y - 100, label, {
-            font: "bold 24px sans-serif",
-            color: "#ffffff",
-            backgroundColor: bg,
-            padding: { x: 8, y: 4 },
-          })
-          .setOrigin(0.5, 1)
-          .setDepth(5);
-      } else {
-        tradeCardTexts[under]
-          .setText(label)
-          .setBackgroundColor(bg)
-          .setVisible(true);
-      }
-    }
-
-    function hideTradeCard(under: string) {
-      if (tradeCardTexts[under]) {
-        tradeCardTexts[under].setVisible(false);
-      }
-    }
-
-    function setLabel(under: string, original: string, description?: string) {
+    function setLabel(under: string, original: string) {
       const alias = ALIAS_MAP[under] || original;
       labels[under]?.setText(alias);
-      // Parse trade info from description "거래소에서 매수||{json}"
-      if (description && description.includes("||")) {
-        try {
-          const json = description.split("||")[1];
-          const info = JSON.parse(json);
-          showTradeCard(under, info);
-        } catch { hideTradeCard(under); }
-      } else {
-        hideTradeCard(under);
-      }
     }
 
-    // Draw + show a trade speech bubble above a character, auto-hiding after a
-    // short hold. A re-shown bubble cancels its previous hide timer.
+    // Show trade image above a character, auto-hiding after a short hold.
     function showTradeBubble(under: string, bubble: TradeBubble) {
       const container = tradeBubbles[under];
-      const txt = tradeBubbleText[under];
-      const gfx = tradeBubbleGfx[under];
-      if (!container || !txt || !gfx) return;
+      const img = tradeBubbleGfx[under];
+      if (!container || !img) return;
 
-      txt.setText(bubble.text).setColor(bubble.color);
-      const padX = 8;
-      const padY = 5;
-      const w = Math.ceil(txt.width) + padX * 2;
-      const h = Math.ceil(txt.height) + padY * 2;
-      const accent = parseInt(bubble.color.slice(1), 16);
-
-      gfx.clear();
-      gfx.fillStyle(0xffffff, 1);
-      gfx.lineStyle(2, accent, 1);
-      gfx.fillRoundedRect(-w / 2, -h, w, h, 6);
-      gfx.strokeRoundedRect(-w / 2, -h, w, h, 6);
-      // Tail pointing down toward the character's head (overlap 1px to hide the
-      // seam where it meets the rounded box's bottom border).
-      gfx.fillStyle(0xffffff, 1);
-      gfx.fillTriangle(-5, -1, 5, -1, 0, 6);
-      gfx.lineStyle(2, accent, 1);
-      gfx.lineBetween(-5, -1, 0, 6);
-      gfx.lineBetween(5, -1, 0, 6);
-
-      txt.setPosition(0, -h / 2);
+      img.setTexture(bubble.action === "SELL" ? "trade_red" : "trade_green");
       container.setVisible(true);
       tradeHideTimers[under]?.remove();
-      tradeHideTimers[under] = scene.time.delayedCall(2400, () =>
+      tradeHideTimers[under] = scene.time.delayedCall(5000, () =>
         container.setVisible(false)
       );
     }
@@ -533,11 +466,6 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       if (label) {
         label.x = body.x - 6;
         label.y = body.y - 50;
-      }
-      const card = tradeCardTexts[under];
-      if (card && card.visible) {
-        card.x = body.x;
-        card.y = body.y - 100;
       }
 
       const bubble = tradeBubbles[under];
@@ -599,6 +527,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
 
     // ---- simulate loop: consume from websocket queue ----
     function updateSim() {
+      if (pausedRef.current) return;
       // Currently animating a step
       if (executeMovement && executeCount > 0) {
         personasMeta.forEach((p) => {
@@ -607,7 +536,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
           if (executeCount === executeCountMax && unit) {
             const [cx, cy] = unit.movement;
             movementTarget[under] = [cx * TILE_WIDTH, cy * TILE_WIDTH];
-            setLabel(under, p.original, unit?.description);
+            setLabel(under, p.original);
             // Fire the trade bubble once, on the step the description transitions
             // INTO a trade label (reaching the exchange), not on every linger step.
             const tb = parseTradeLabel(unit.description);

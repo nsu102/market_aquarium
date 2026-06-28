@@ -43,9 +43,15 @@ export default function AssetModal({ asset, onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3 border-b-2 border-black bg-pixel-table">
-          <div className="w-9 h-9 flex items-center justify-center border-2 border-black rounded-lg bg-pixel-grass">
-            <BarChart3 size={18} className="text-black" />
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`https://assets.coincap.io/assets/icons/${asset.symbol.toLowerCase()}@2x.png`}
+            alt={asset.symbol}
+            width={36}
+            height={36}
+            className="shrink-0 rounded-lg border-2 border-black"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
           <div className="flex-1 min-w-0">
             <div className="text-base font-bold text-black truncate">{asset.name}</div>
             <div className="text-[11px] text-pixel-muted">{asset.symbol}</div>

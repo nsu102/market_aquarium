@@ -80,11 +80,14 @@ export default function SetupScreen({ onStart, onResume }: Props) {
     setHasSavedSession(!!loadSessionUid());
     fetchPresets().then((p) => {
       setPresets(p);
-      // Apply default preset (index 0) to all agents on load
+      // Apply a random preset to each agent on load
+      const indices: Record<string, number> = {};
       setAgents((prev) => prev.map((a) => {
         const specs = p[a.id];
         if (!specs?.length) return a;
-        const spec = specs[0];
+        const idx = Math.floor(Math.random() * specs.length);
+        indices[a.id] = idx;
+        const spec = specs[idx];
         const total = spec.total;
         const cash = total * spec.cash_pct / 100;
         const portfolio = Object.entries(spec.alloc)
@@ -97,7 +100,8 @@ export default function SetupScreen({ onStart, onResume }: Props) {
           });
         return { ...a, cash, portfolio };
       }));
-    }).catch(() => {});
+      setPresetIndices(indices);
+    }).catch(() => { });
   }, []);
 
   const selected = agents[selectedIdx];
@@ -274,9 +278,8 @@ export default function SetupScreen({ onStart, onResume }: Props) {
                   <button
                     key={agent.id}
                     onClick={() => setSelectedIdx(idx)}
-                    className={`w-full flex items-center gap-2 px-2 py-[7px] text-left cursor-pointer border-l-4 ${
-                      sel ? "bg-pixel-path border-pixel-gold" : "border-transparent hover:bg-pixel-path"
-                    } ${!agent.enabled ? "opacity-30" : ""}`}
+                    className={`w-full flex items-center gap-2 px-2 py-[7px] text-left cursor-pointer border-l-4 ${sel ? "bg-pixel-path border-pixel-gold" : "border-transparent hover:bg-pixel-path"
+                      } ${!agent.enabled ? "opacity-30" : ""}`}
                   >
                     <div className="w-7 h-7 border-2 border-black rounded-lg bg-white overflow-hidden flex items-center justify-center flex-shrink-0">
                       <Image src={agent.profile} alt="" width={22} height={22} style={{ imageRendering: "pixelated" }} />
@@ -306,9 +309,8 @@ export default function SetupScreen({ onStart, onResume }: Props) {
             <div className="flex-1 flex flex-col items-center justify-center px-4 relative">
               <button
                 onClick={() => updateAgent({ enabled: !selected.enabled })}
-                className={`absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-[3px] text-[9px] font-bold cursor-pointer border-2 border-black rounded-full ${
-                  selected.enabled ? "bg-pixel-grass text-black" : "bg-white text-pixel-muted"
-                }`}
+                className={`absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-[3px] text-[9px] font-bold cursor-pointer border-2 border-black rounded-full ${selected.enabled ? "bg-pixel-grass text-black" : "bg-white text-pixel-muted"
+                  }`}
               >
                 {selected.enabled ? <Eye size={9} /> : <EyeOff size={9} />}
                 {selected.enabled ? "참여" : "제외"}
@@ -334,21 +336,13 @@ export default function SetupScreen({ onStart, onResume }: Props) {
             {/* Traits + Delete */}
             <div className="px-3 pb-3">
               <Hdr title="특징" icon={Shield} />
-              <div className="flex gap-1.5 mb-2 overflow-x-auto">
+              <div className="flex gap-1.5 mb-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                 {selected.traits.map((t) => (
                   <span key={t} className="inline-flex items-center bg-white border-2 border-black rounded-full px-2.5 py-[3px] text-[10px] text-black font-medium leading-none whitespace-nowrap flex-shrink-0">
                     {t}
                   </span>
                 ))}
               </div>
-              {agents.length > 2 && (
-                <button
-                  onClick={() => removeAgent(selectedIdx)}
-                  className="w-full flex items-center justify-center gap-1 py-[5px] border-2 border-black rounded-lg bg-pixel-danger text-white text-[9px] font-bold hover:brightness-90 cursor-pointer active:translate-x-[1px] active:translate-y-[1px]"
-                >
-                  <Trash2 size={10} />삭제
-                </button>
-              )}
             </div>
           </div>
 
@@ -370,9 +364,8 @@ export default function SetupScreen({ onStart, onResume }: Props) {
                   <div className="flex gap-1 flex-wrap">
                     {CASH_PRESETS.map((v) => (
                       <button key={v} onClick={() => updateAgent({ cash: v })}
-                        className={`px-1.5 py-[2px] text-[8px] font-bold cursor-pointer border-2 border-black rounded-md ${
-                          Math.round(selected.cash) === v ? "bg-pixel-gold text-white" : "bg-white text-pixel-muted hover:text-black"
-                        }`}>{formatKRW(v)}</button>
+                        className={`px-1.5 py-[2px] text-[8px] font-bold cursor-pointer border-2 border-black rounded-md ${Math.round(selected.cash) === v ? "bg-pixel-gold text-white" : "bg-white text-pixel-muted hover:text-black"
+                          }`}>{formatKRW(v)}</button>
                     ))}
                   </div>
                 </Panel>
@@ -553,10 +546,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
                 </div>
 
                 {/* Modal footer */}
-                <div className="flex items-center justify-between px-4 py-3 bg-pixel-wall border-t-2 border-black">
-                  <PixelButton variant="danger" size="sm" onClick={() => { removePortfolioItem(item.asset); setEditingAsset(null); }}>
-                    <X size={10} />삭제
-                  </PixelButton>
+                <div className="flex items-center justify-end px-4 py-3 bg-pixel-wall border-t-2 border-black">
                   <PixelButton variant="primary" size="sm" onClick={() => setEditingAsset(null)}>
                     확인
                   </PixelButton>

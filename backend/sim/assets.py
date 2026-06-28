@@ -8,6 +8,7 @@ fetch, then fixed); no live price API.
 from __future__ import annotations
 
 import json
+import random
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,12 +36,32 @@ def _get_raw(path: Path | None = None) -> dict:
     return doc
 
 
+def _synth_history(current_price: float, symbol: str, n: int = 20) -> list[float]:
+    """Generate n synthetic past prices ending at current_price.
+
+    Uses a seeded random walk backwards so the sparkline is deterministic
+    per symbol and looks like a plausible recent trend.
+    """
+    # ponytail: seeded per-symbol so restarts produce the same sparkline
+    rng = random.Random(hash(symbol) & 0xFFFF_FFFF)
+    # Walk backward from current price with ~1-3% steps
+    pts = [current_price]
+    p = current_price
+    for _ in range(n - 1):
+        step = rng.gauss(0, 0.015) * p
+        p = max(p - step, current_price * 0.5)
+        pts.append(round(p, 2))
+    pts.reverse()
+    return pts
+
+
 def load_assets(path: Path | None = None, limit: int | None = None) -> list[Asset]:
     """Return assets as Asset models. Reads from MongoDB first, file fallback."""
     raw = _get_raw(path)
     out: list[Asset] = []
     for a in raw.get("assets", []):
         price = float(a.get("price") or 0.0)
+        history = _synth_history(price, a.get("symbol", ""), 20)
         out.append(
             Asset(
                 symbol=a["symbol"],
@@ -48,7 +69,7 @@ def load_assets(path: Path | None = None, limit: int | None = None) -> list[Asse
                 price=price,
                 change24h=float(a.get("change24h") or 0.0),
                 volume=float(a.get("volume") or 0.0),
-                priceHistory=[price],
+                priceHistory=history,
                 sector=a.get("sector", ""),
             )
         )

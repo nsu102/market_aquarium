@@ -26,5 +26,6 @@ export function parseTradeLabel(
   desc: string | null | undefined
 ): TradeBubble | null {
   if (!desc) return null;
-  return LABEL_TO_BUBBLE[desc] ?? null;
+  const label = desc.split("||", 1)[0];
+  return LABEL_TO_BUBBLE[label] ?? null;
 }

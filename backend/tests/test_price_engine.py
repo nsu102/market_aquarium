@@ -12,8 +12,22 @@ from sim.price_engine import (
 )
 
 
-def _asset(symbol: str = "BTC", price: float = 100.0) -> Asset:
-    return Asset(symbol=symbol, name=symbol, price=price, priceHistory=[price])
+def _asset(
+    symbol: str = "BTC",
+    price: float = 100.0,
+    *,
+    sector: str = "",
+    volume: float = 0.0,
+    history: list[float] | None = None,
+) -> Asset:
+    return Asset(
+        symbol=symbol,
+        name=symbol,
+        price=price,
+        sector=sector,
+        volume=volume,
+        priceHistory=history or [price],
+    )
 
 
 def _agent(
@@ -26,15 +40,30 @@ def _agent(
                  fear=fear, greed=greed)
 
 
-def _sell(agent_id: str, symbol: str = "BTC") -> TradeResult:
-    return TradeResult(agent_id=agent_id, action=Action.SELL, symbol=symbol)
+def _sell(
+    agent_id: str,
+    symbol: str = "BTC",
+    *,
+    qty: float = 0.0,
+    price: float = 0.0,
+) -> TradeResult:
+    return TradeResult(agent_id=agent_id, action=Action.SELL, symbol=symbol, qty=qty, price=price)
 
 
-def _buy(agent_id: str, symbol: str = "BTC", large: bool = False) -> TradeResult:
+def _buy(
+    agent_id: str,
+    symbol: str = "BTC",
+    large: bool = False,
+    *,
+    qty: float = 0.0,
+    price: float = 0.0,
+) -> TradeResult:
     return TradeResult(
         agent_id=agent_id,
         action=Action.BUY_LARGE if large else Action.BUY,
         symbol=symbol,
+        qty=qty,
+        price=price,
     )
 
 
@@ -92,14 +121,131 @@ def test_report_exposes_breakdown():
     assert b.old_price == 250.0
 
 
-def test_new_price_never_negative():
+def test_extreme_event_is_capped_and_price_never_negative():
     asset = _asset(price=100.0)
     agents = [_agent("a", cash=10_000, fear=100, greed=0)]
     trades = [_sell("a")]
-    # extreme negative event drives total well below -100%
     b = compute_price_change(asset, -9999.0, agents, trades, seed=3)
-    assert b.total_pct < -100
+    assert -30.0 < b.total_pct < 0.0
     assert b.new_price >= 0
+
+
+def test_event_sensitivity_differs_by_asset_profile():
+    btc = _asset("BTC", sector="L1_major", volume=90_000_000_000)
+    pepe = _asset("PEPE", sector="meme", volume=3_000_000_000)
+    agents = [_agent("a")]
+    b_btc = compute_price_change(
+        btc,
+        2.0,
+        agents,
+        [],
+        seed=10,
+        coefficients={"noise_amplitude": 0.0},
+    )
+    b_pepe = compute_price_change(
+        pepe,
+        2.0,
+        agents,
+        [],
+        seed=10,
+        coefficients={"noise_amplitude": 0.0},
+    )
+    assert b_pepe.event_impact > b_btc.event_impact
+    assert b_pepe.total_pct > b_btc.total_pct
+
+
+def test_direct_asset_event_amplifies_targeted_symbol():
+    sol = _asset("SOL", sector="L1_major", volume=40_000_000_000)
+    agents = [_agent("a")]
+    coeffs = {
+        "noise_amplitude": 0.0,
+        "emotion_scale": 0.0,
+        "order_scale": 0.0,
+        "event_dispersion": 0.0,
+    }
+
+    targeted = compute_price_change(
+        sol,
+        -3.0,
+        agents,
+        [],
+        seed=10,
+        coefficients=coeffs,
+        event_text="솔라나 악재 발생",
+    )
+    generic = compute_price_change(
+        sol,
+        -3.0,
+        agents,
+        [],
+        seed=10,
+        coefficients=coeffs,
+        event_text="시장 악재 발생",
+    )
+
+    assert abs(targeted.event_impact) > abs(generic.event_impact)
+    assert targeted.total_pct < generic.total_pct
+
+
+def test_direct_negative_sol_event_keeps_sol_down():
+    sol = _asset("SOL", price=100.0, sector="L1_major", volume=40_000_000_000)
+    greedy = [_agent("a", greed=95, fear=5), _agent("b", greed=90, fear=10)]
+
+    b = compute_price_change(
+        sol,
+        -3.0,
+        greedy,
+        [],
+        seed=4,
+        event_text="솔라나 악제 발생",
+    )
+
+    assert b.event_impact < 0
+    assert b.total_pct < 0
+    assert b.new_price < b.old_price
+
+
+def test_recent_overshoot_can_split_round_direction():
+    hot = _asset("BTC", price=108.0, sector="L1_major", history=[100.0, 104.0, 108.0])
+    washed_out = _asset("ETH", price=92.0, sector="L1_major", history=[100.0, 96.0, 92.0])
+    coeffs = {
+        "noise_amplitude": 0.0,
+        "event_scale": 0.0,
+        "emotion_scale": 0.0,
+        "order_scale": 0.0,
+    }
+
+    hot_b = compute_price_change(hot, 0.0, [], [], seed=5, coefficients=coeffs)
+    washed_b = compute_price_change(washed_out, 0.0, [], [], seed=5, coefficients=coeffs)
+
+    assert hot_b.total_pct < 0
+    assert washed_b.total_pct > 0
+
+
+def test_low_liquidity_trade_moves_more_than_high_liquidity():
+    rich = [_agent("a", cash=100_000)]
+    high_liq = _asset("BTC", sector="L1_major", volume=100_000_000_000)
+    low_liq = _asset("PEPE", sector="meme", volume=1_000_000_000)
+    coeffs = {"noise_amplitude": 0.0, "event_scale": 0.0, "emotion_scale": 0.0}
+
+    high = compute_price_change(
+        high_liq,
+        0.0,
+        rich,
+        [_buy("a", "BTC", qty=500.0, price=100.0)],
+        seed=7,
+        coefficients=coeffs,
+    )
+    low = compute_price_change(
+        low_liq,
+        0.0,
+        rich,
+        [_buy("a", "PEPE", qty=500.0, price=100.0)],
+        seed=7,
+        coefficients=coeffs,
+    )
+
+    assert low.order_pressure > high.order_pressure
 
 
 def test_apply_breakdown_mutates_asset():
