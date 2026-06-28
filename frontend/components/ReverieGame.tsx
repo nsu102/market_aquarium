@@ -213,6 +213,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       this.load.image("trade_green", "/assets/trade_green.png");
       this.load.image("trade_red", "/assets/trade_red.png");
 
+
       const atlasJson = A("characters/atlas.json");
       // Generic atlas used for the (invisible) camera "player" sprite.
       this.load.atlas("atlas", A("characters/Yuriko_Yamamoto.png"), atlasJson);
@@ -287,7 +288,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       const camera = this.cameras.main;
       camera.startFollow(player);
       camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-      camera.setZoom(0.35);
+      camera.setZoom(0.45);
       cursors = this.input.keyboard!.createCursorKeys();
       // Don't preventDefault on SPACE/arrows: capturing them would steal the
       // space bar (and arrows) from text inputs like the event-input modal.
@@ -335,7 +336,7 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
           .sprite(startPos[0], startPos[1], name, "down")
           .setSize(30, 40)
           .setOffset(0, 32)
-          .setScale(2);
+          .setScale(3);
         // Click a character to open its detail (portfolio composition, etc.).
         sprite.setInteractive({ useHandCursor: true });
         sprite.on("pointerdown", () => onSelectRef.current?.(p.original));
@@ -364,13 +365,13 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
 
       // *** BUILDING LABELS ***
       const buildingLabels = [
-        { x: 32, y: 45, text: "게시판", bg: "#2E7D32cc" },
-        { x: 63, y: 41, text: "거래소", bg: "#C85A4Acc" },
-        { x: 84, y: 41, text: "카페", bg: "#A8741Acc" },
+        { px: 1179, py: 1326, text: "게시판", bg: "#2E7D32cc" },
+        { px: 1899, py: 1265, text: "거래소", bg: "#C85A4Acc" },
+        { px: 2496, py: 1265, text: "카페", bg: "#A8741Acc" },
       ];
-      buildingLabels.forEach(({ x, y, text, bg }) => {
+      buildingLabels.forEach(({ px, py, text, bg }) => {
         this.add
-          .text(x * TILE_WIDTH + TILE_WIDTH / 2, y * TILE_WIDTH, text, {
+          .text(px, py, text, {
             font: "bold 36px sans-serif",
             color: "#ffffff",
             padding: { x: 10, y: 6 },

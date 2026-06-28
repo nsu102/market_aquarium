@@ -3,8 +3,16 @@
 import { Agent } from "@/mock_data/agents";
 import { Wallet, Activity, Briefcase, User } from "lucide-react";
 import { AGENT_ICONS } from "@/lib/agentIcons";
+import { getProfileImg } from "@/lib/profileImg";
 import { formatKRW } from "@/utils/numberInput";
 import PixelModal from "@/components/pixel/PixelModal";
+
+function emotionEmoji(agent: Agent): string {
+  const diff = agent.greed - agent.fear;
+  if (agent.fear >= 75 || diff <= -20) return "😡";
+  if (diff >= 20) return "😊";
+  return "😐";
+}
 
 export default function AgentDetail({
   agent,
@@ -14,6 +22,7 @@ export default function AgentDetail({
   onClose: () => void;
 }) {
   const AgentIcon = AGENT_ICONS[agent.id] || AGENT_ICONS.default;
+  const profileSrc = getProfileImg(agent.id);
 
   return (
     <PixelModal
@@ -26,13 +35,20 @@ export default function AgentDetail({
       {/* Header row */}
       <div className="flex items-center gap-3 mb-4">
         <div
-          className="w-12 h-12 flex items-center justify-center border-2 border-black rounded-xl"
+          className="w-12 h-12 shrink-0 flex items-center justify-center border-2 border-black rounded-xl overflow-hidden"
           style={{ background: agent.color }}
         >
-          <AgentIcon size={22} className="text-black" />
+          {profileSrc ? (
+            <img src={profileSrc} alt={agent.alias} className="w-full h-full object-cover" />
+          ) : (
+            <AgentIcon size={22} className="text-black" />
+          )}
         </div>
         <div className="flex-1">
-          <div className="text-base font-bold text-black">{agent.alias}</div>
+          <div className="text-base font-bold text-black flex items-center gap-1.5">
+            {agent.alias}
+            <span className="text-base">{emotionEmoji(agent)}</span>
+          </div>
           <div className="text-[11px] text-pixel-muted">{agent.type}</div>
         </div>
       </div>

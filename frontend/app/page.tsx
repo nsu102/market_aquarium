@@ -468,7 +468,7 @@ export default function Home() {
 
         {/* Right column: board feed */}
         {boardOpen && (
-          <aside className="w-[370px] shrink-0 border-l-2 border-black overflow-hidden">
+          <aside className="w-[320px] shrink-0 border-l-2 border-black overflow-hidden">
             <BoardFeed
               posts={posts}
               events={events}

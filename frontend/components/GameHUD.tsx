@@ -115,14 +115,10 @@ export default function GameHUD({
     return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
   }, [forceEventOpen, isFirstRound]);
 
-  // Reset countdown when user types or focuses the input
-  const [inputFocused, setInputFocused] = useState(false);
+  // Reset countdown when user types (they're engaged)
   useEffect(() => {
     if (forceEventOpen && !isFirstRound && eventText) setCountdown(AUTO_SUBMIT_SEC);
   }, [eventText, forceEventOpen, isFirstRound]);
-  useEffect(() => {
-    if (forceEventOpen && !isFirstRound && inputFocused) setCountdown(AUTO_SUBMIT_SEC);
-  }, [inputFocused, forceEventOpen, isFirstRound]);
 
   return (
     <>
@@ -171,8 +167,8 @@ export default function GameHUD({
                       e.stopPropagation();
                       if (e.key === "Enter") submit();
                     }}
-                    onFocus={() => { setInputFocused(true); onKeyboardEnabled?.(false); }}
-                    onBlur={() => { setInputFocused(false); onKeyboardEnabled?.(true); }}
+                    onFocus={() => onKeyboardEnabled?.(false)}
+                    onBlur={() => onKeyboardEnabled?.(true)}
                     placeholder={placeholder}
                     autoFocus
                     className="flex-1 bg-white border-2 border-black rounded-lg px-3 py-2 text-[12px] text-black placeholder:text-pixel-muted focus:outline-none focus:border-pixel-greenText focus:bg-pixel-path"
