@@ -321,11 +321,9 @@ class GameSession:
                 interests=interests, sectors=sectors, post_only=False,
                 min_round_threads=min_threads, max_round_threads=max_threads,
             )
-        # SNS spectators use scripted client (no LLM) — they're NPCs
-        _scripted = scripted_client()
         def _write_sns(ag):
             return ag, sns.view_sns(
-                _scripted, ag, event, self.posts, rnd, timestamp=ts, force=True,
+                self.client, ag, event, self.posts, rnd, timestamp=ts, force=True,
                 min_round_threads=min_threads, max_round_threads=max_threads,
             )
         with ThreadPoolExecutor(max_workers=8) as ex:
