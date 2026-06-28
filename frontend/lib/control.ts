@@ -39,6 +39,7 @@ export interface StartResponse {
   uid: string;
   seed: number;
   step: number;
+  assets?: Array<{ symbol: string; name: string; price: number; change24h: number; volume: number; sector: string; priceHistory: number[] }>;
 }
 
 export interface RunResponse {

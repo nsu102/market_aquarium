@@ -55,7 +55,7 @@ function normalizeImpact(
 
 export default function Home() {
   const [gameStarted, setGameStarted] = useState(false);
-  const [currentRound, setCurrentRound] = useState(1);
+  const [currentRound, setCurrentRound] = useState(0);
   const [marketOpen, setMarketOpen] = useState(true);
   const [boardOpen, setBoardOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
@@ -97,7 +97,7 @@ export default function Home() {
     });
     setEvents([]);
     setPosts([]);
-    setCurrentRound(1);
+    setCurrentRound(0);
   }, []);
 
   const handleStart = useCallback(
@@ -123,6 +123,13 @@ export default function Home() {
           if (res.uid) {
             setSessionUid(res.uid);
             control.saveSessionUid(res.uid);
+          }
+          // Use backend's full asset list (37 coins) instead of frontend DEFAULT_ASSETS (4)
+          if (res.assets?.length) {
+            const backendAssets = res.assets as Asset[];
+            setMarketData((prev) =>
+              prev ? { ...prev, assets: backendAssets } : prev
+            );
           }
         })
         .catch((err) => {
