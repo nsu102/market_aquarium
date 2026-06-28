@@ -17,7 +17,7 @@ from __future__ import annotations
 import random
 from concurrent.futures import ThreadPoolExecutor
 
-from . import credibility, emotion, market_state, price_engine, report, sns, trade
+from . import branch, credibility, emotion, market_state, price_engine, report, sns, trade
 from .assets import assets_by_symbol, load_assets, load_sectors
 from .llm import LLMClient, default_client, scripted_client
 from .models import (
@@ -126,6 +126,8 @@ class GameSession:
         self._initial_state = {
             a.id: {"cash": a.cash, "net_worth": self._net_worth(a)} for a in self.agents
         }
+        # FR-Branch: per-protagonist arc trail -> end-of-game endings/ghosts.
+        self.arc = branch.ArcTracker(self.agents, prices)
 
     @classmethod
     def restore(cls, saved: dict, assets=None, seed: int = 42) -> "GameSession":
@@ -147,6 +149,10 @@ class GameSession:
         session._initial_state = {
             a.id: {"cash": a.cash, "net_worth": session._net_worth(a)} for a in session.agents
         }
+        # FR-Branch: arc trail starts fresh on restore (pre-resume rounds not replayed).
+        session.arc = branch.ArcTracker(
+            session.agents, {a.symbol: a.price for a in session.assets}
+        )
         return session
 
     # ------------------------------------------------------------------ #
@@ -222,8 +228,13 @@ class GameSession:
         is_rumor: bool = False,
         cred_source: str | None = None,
         timestamp: str | None = None,
+        base_shock: float | None = None,
     ) -> RoundReport:
-        """Advance one round given the user's single event (FR-1 .. FR-8)."""
+        """Advance one round given the user's single event (FR-1 .. FR-8).
+
+        ``base_shock`` (a signed %) overrides the impact-derived event term when a
+        card supplies its own shock seed (FR-Branch); else IMPACT_BASE_PCT is used.
+        """
         if self.finished:
             raise RuntimeError("simulation already finished (5 rounds)")
         # Snapshot every axis BEFORE this round's changes so the 감정 탭 can show
@@ -316,11 +327,13 @@ class GameSession:
             ag.bubble = _ACTION_BUBBLE.get(ag.lastAction, "")
 
         # --- FR-7: price distortion from event + order pressure + emotion + noise ---
+        # A card supplies its own base_shock; bare events fall back to IMPACT_BASE_PCT.
+        event_base = base_shock if base_shock is not None else IMPACT_BASE_PCT.get(impact, 0.0)
         breakdowns = []
         for i, asset in enumerate(self.assets):
             b = price_engine.compute_price_change(
                 asset,
-                IMPACT_BASE_PCT.get(impact, 0.0),
+                event_base,
                 self.agents,
                 trades,
                 seed=self.seed + rnd * 1000 + i,
@@ -334,6 +347,13 @@ class GameSession:
         )
         rr = report.build_round_report(rnd, self.market, breakdowns, self.agents, trades)
         self.round_reports.append(rr)
+
+        # FR-Branch: snapshot each protagonist's marked-to-market state + the
+        # round's market regime (fear/greed) for end-of-game ending resolution.
+        self.arc.update(
+            rnd, self.agents, self.market.fearGreedIndex,
+            {a.symbol: a.price for a in self.assets},
+        )
 
         # Per-agent round summary so the frontend can choreograph movement:
         # who walked to the board (and what they posted) and to the exchange
@@ -446,7 +466,10 @@ class GameSession:
     def overall_report(self) -> OverallReport:
         prices = {a.symbol: a.price for a in self.assets}
         achievements = report.award_achievements(self.agents, self._initial_state, prices)
-        return report.build_overall_report(self.round_reports, self.agents, achievements)
+        endings = self.arc.endings(self.agents)
+        return report.build_overall_report(
+            self.round_reports, self.agents, achievements, endings
+        )
 
     def _emotion_deltas(self) -> dict[str, dict]:
         """Per-agent change of each axis vs the start of the current round."""

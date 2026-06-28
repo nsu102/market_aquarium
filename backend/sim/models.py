@@ -326,7 +326,21 @@ class Achievement(BaseModel):
     description: str = ""
 
 
+class EndingResult(BaseModel):
+    """FR-Branch: a protagonist's end-of-game fate (docs/branch_design.md §5)."""
+
+    agent_id: str
+    agent_alias: str = ""
+    agent_type: str = ""
+    ending_id: str            # "E1".."F4"
+    title: str
+    description: str = ""
+    ghost_text: str = ""       # nearest un-reached branch ("almost") caption
+    persona_mutation: dict = Field(default_factory=dict)
+
+
 class OverallReport(BaseModel):
     rounds: list[RoundReport] = Field(default_factory=list)
     achievements: list[Achievement] = Field(default_factory=list)
+    endings: list[EndingResult] = Field(default_factory=list)
     markdown: str = ""

@@ -1,0 +1,26 @@
+{
+  "fear_zone": 30,
+  "greed_zone": 70,
+  "profit_mark": 1.10,
+  "ghost_fear": 5,
+  "ghost_networth": 0.08,
+  "panic_seller": {
+    "ruin_networth": 0.10,
+    "ruin_fear": 90,
+    "jackpot_greed": 85,
+    "jackpot_networth": 1.30,
+    "awaken_networth": 0.70,
+    "awaken_fear": 60
+  },
+  "whale": {
+    "win_networth": 1.30,
+    "caught_networth": 0.85,
+    "cautious_lo": 0.90,
+    "cautious_hi": 1.10
+  },
+  "fomo_trader": {
+    "wipeout_networth": 0.70,
+    "jackpot_networth": 1.30,
+    "stuck_networth": 0.95
+  }
+}

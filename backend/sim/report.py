@@ -17,6 +17,7 @@ from .models import (
     Achievement,
     Action,
     Agent,
+    EndingResult,
     MarketData,
     OverallReport,
     PriceBreakdown,
@@ -275,12 +276,15 @@ def build_overall_report(
     round_reports: list[RoundReport],
     agents: list[Agent],
     achievements: list[Achievement],
+    endings: list[EndingResult] | None = None,
 ) -> OverallReport:
     """Assemble the end-of-game summary across all rounds (no emoji)."""
-    markdown = _overall_markdown(round_reports, achievements)
+    endings = list(endings or [])
+    markdown = _overall_markdown(round_reports, achievements, endings)
     return OverallReport(
         rounds=list(round_reports),
         achievements=list(achievements),
+        endings=endings,
         markdown=markdown,
     )
 
@@ -288,6 +292,7 @@ def build_overall_report(
 def _overall_markdown(
     round_reports: list[RoundReport],
     achievements: list[Achievement],
+    endings: list[EndingResult] | None = None,
 ) -> str:
     """Render the Korean markdown body for the overall report (no emoji)."""
     lines: list[str] = []
@@ -323,6 +328,16 @@ def _overall_markdown(
         lines.append(trend)
         lines.append("")
         lines.append(_trend_comment(round_reports))
+        lines.append("")
+
+    # --- Endings (FR-Branch) -----------------------------------------------
+    if endings:
+        lines.append("## 주인공 엔딩")
+        lines.append("")
+        for e in endings:
+            lines.append(f"- **[{e.ending_id}] {e.title}** — {e.description}")
+            if e.ghost_text:
+                lines.append(f"  - 그림자 분기: {e.ghost_text}")
         lines.append("")
 
     # --- Achievements ------------------------------------------------------

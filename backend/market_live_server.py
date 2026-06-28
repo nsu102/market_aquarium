@@ -46,7 +46,7 @@ from path_finder import path_finder  # noqa: E402  (path util)
 from utils import collision_block_id  # noqa: E402  (config)
 
 from backend.sim.engine import GameSession  # noqa: E402
-from backend.sim import emotion as _emotion, sns as _sns  # noqa: E402
+from backend.sim import emotion as _emotion, sns as _sns, cards as _cards  # noqa: E402
 from backend.sim.models import (  # noqa: E402
     Comment as _Comment,
     Event as _Event,
@@ -147,6 +147,9 @@ class Live:
         self.final_market: dict | None = None
         self.start_prices: dict = {}
         self.final_prices: dict = {}
+        # FR-Branch: the card chosen last round drives next round's deck cascade.
+        self.last_card_id: str | None = None
+        self.chosen_cards: list[str] = []
 
         # --- random-walk state (plan: map is decoupled from the board) -------
         # Agents wander freely & continuously: head to a random destination,
@@ -477,6 +480,11 @@ class EventBody(BaseModel):
     text: str
     is_rumor: bool = False
     source: str = "user"
+    # FR-Branch: when the player picks a card (vs the free-text wildcard), the
+    # card supplies its own impact + base_shock and feeds the deck cascade.
+    card_id: str | None = None
+    impact: str | None = None
+    base_shock: float | None = None
 
 
 class StepBody(BaseModel):
@@ -612,8 +620,13 @@ def control_market_event(body: EventBody):
                 "error": "5 라운드 종료 — 재시작하세요"}
     live.start_market = live.game.market.model_dump()
     live.start_prices = {a.symbol: a.price for a in live.game.assets}
+    # Resolve card vs wildcard: a card carries its own impact + base_shock.
+    impact = _EventImpact(body.impact) if body.impact in ("positive", "negative", "neutral") else None
     try:
-        live.game.run_round(body.text, source=body.source, is_rumor=body.is_rumor)
+        live.game.run_round(
+            body.text, impact=impact, source=body.source,
+            is_rumor=body.is_rumor, base_shock=body.base_shock,
+        )
     except RuntimeError as e:
         return {"status": "finished", "round": live.game.round, "error": str(e)}
     except Exception as e:
@@ -633,10 +646,39 @@ def control_market_event(body: EventBody):
     except Exception as e:
         print(f"[WARN] save_game_state failed: {e}")
 
+    # Record the pick so next round's deck cascades (locks/unlocks).
+    if body.card_id:
+        live.last_card_id = body.card_id
+        live.chosen_cards.append(body.card_id)
     ev = live.game.events[0] if live.game.events else None
     return {"status": "ok", "round": live.game.round,
             "event": ev.text if ev else body.text,
             "impact": (ev.impact.value if hasattr(ev.impact, "value") else ev.impact) if ev else "neutral"}
+
+
+@app.get("/control/cards")
+def control_cards(uid: str | None = None):
+    """FR-Branch: the choice cards for the upcoming round + wildcard slot.
+
+    The deck cascades from the previous pick (locks/unlocks). Returns an empty
+    deck once the 5 rounds are done.
+    """
+    live = _get_live(uid)
+    if live is None:
+        return {"ready": False, "cards": [], "wildcard": True}
+    game = live.game
+    if game.finished:
+        return {"ready": True, "finished": True, "round": game.round,
+                "cards": [], "wildcard": False}
+    next_round = game.round + 1
+    deck = _cards.choose_round_cards(next_round, live.last_card_id, k=3, seed=game.seed)
+    locked = _cards.locked_cards(live.last_card_id)
+    return {
+        "ready": True, "finished": False, "round": next_round, "wildcard": True,
+        "cards": [c.model_dump() for c in deck],
+        # Cards the previous pick closed off — shown greyed/locked in the UI.
+        "locked": [c.model_dump() for c in locked],
+    }
 
 
 @app.get("/control/market/state")
