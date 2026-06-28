@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { Post } from "@/mock_data/posts";
 import {
   Heart,
@@ -13,9 +14,22 @@ import {
   Share2,
   Bookmark,
 } from "lucide-react";
-import { AGENT_ICONS } from "@/lib/agentIcons";
+import { getAgentProfile } from "@/lib/agentProfiles";
 
 const tabs = ["전체", "BTC", "ETH", "SOL"];
+
+function AgentAvatar({ agentId, size = 32 }: { agentId: string; size?: number }) {
+  const profile = getAgentProfile(agentId);
+  return (
+    <Image
+      src={profile}
+      alt=""
+      width={size}
+      height={size}
+      style={{ imageRendering: "pixelated" }}
+    />
+  );
+}
 
 export default function BoardFeed({ posts }: { posts: Post[] }) {
   const [activeTab, setActiveTab] = useState("전체");
@@ -104,7 +118,6 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
         {/* Posts feed */}
         <div className="flex-1 overflow-y-auto bg-surface-secondary/30">
           {filtered.map((post, idx) => {
-            const AgentIcon = AGENT_ICONS[post.agentId] || AGENT_ICONS.default;
             const liked = likedPosts.has(post.id);
             const showComments = expandedComments.has(post.id);
 
@@ -117,8 +130,8 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
               >
                 {/* Author row */}
                 <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-9 h-9 rounded-full bg-surface-secondary border border-border-light flex items-center justify-center text-text-secondary">
-                    <AgentIcon size={16} />
+                  <div className="w-9 h-9 rounded-full bg-surface-secondary border border-border-light flex items-center justify-center overflow-hidden">
+                    <AgentAvatar agentId={post.agentId} size={28} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-semibold text-text-primary leading-tight">
@@ -178,24 +191,21 @@ export default function BoardFeed({ posts }: { posts: Post[] }) {
                 {/* Comments (expandable) */}
                 {post.comments.length > 0 && showComments && (
                   <div className="mt-3 pt-2.5 border-t border-border-light space-y-2.5">
-                    {post.comments.map((c, i) => {
-                      const CIcon = AGENT_ICONS[c.agentId] || AGENT_ICONS.default;
-                      return (
-                        <div key={i} className="flex items-start gap-2">
-                          <div className="w-6 h-6 rounded-full bg-surface-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <CIcon size={11} className="text-text-tertiary" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-[11px] font-semibold text-text-primary">
-                              {c.agentAlias}
-                            </span>
-                            <p className="text-[11px] text-text-secondary leading-[1.5] mt-0.5">
-                              {c.content}
-                            </p>
-                          </div>
+                    {post.comments.map((c, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <div className="w-6 h-6 rounded-full bg-surface-secondary flex items-center justify-center flex-shrink-0 mt-0.5 overflow-hidden">
+                          <AgentAvatar agentId={c.agentId} size={20} />
                         </div>
-                      );
-                    })}
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[11px] font-semibold text-text-primary">
+                            {c.agentAlias}
+                          </span>
+                          <p className="text-[11px] text-text-secondary leading-[1.5] mt-0.5">
+                            {c.content}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 

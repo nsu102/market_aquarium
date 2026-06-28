@@ -26,6 +26,7 @@ interface Props {
   boardNotifications: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  isProcessing?: boolean;
 }
 
 function Badge({ count }: { count: number }) {
@@ -51,6 +52,7 @@ export default function GameHUD({
   boardNotifications,
   onZoomIn,
   onZoomOut,
+  isProcessing,
 }: Props) {
   const [eventOpen, setEventOpen] = useState(false);
   const [eventText, setEventText] = useState("");
@@ -127,11 +129,16 @@ export default function GameHUD({
 
           {/* Event trigger */}
           <button
-            onClick={() => setEventOpen(true)}
-            className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-accent-gold hover:bg-accent-gold/10 transition cursor-pointer"
+            onClick={() => !isProcessing && setEventOpen(true)}
+            disabled={isProcessing}
+            className={`flex items-center gap-1.5 px-3 h-8 rounded-lg transition cursor-pointer ${
+              isProcessing
+                ? "text-text-tertiary opacity-50 cursor-not-allowed"
+                : "text-accent-gold hover:bg-accent-gold/10"
+            }`}
           >
-            <Zap size={14} />
-            <span className="text-[11px] font-semibold">이벤트</span>
+            <Zap size={14} className={isProcessing ? "animate-pulse" : ""} />
+            <span className="text-[11px] font-semibold">{isProcessing ? "처리중..." : "이벤트"}</span>
           </button>
         </div>
       </div>
