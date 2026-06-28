@@ -122,6 +122,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        "ngrok-skip-browser-warning": "1",
         ...(init?.headers || {}),
       },
       cache: "no-store",

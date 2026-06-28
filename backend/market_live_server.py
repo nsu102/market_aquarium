@@ -118,10 +118,11 @@ threading.Thread(
     target=lambda: __import__("backend.sim.sentiment", fromlist=["_get_pipeline"])._get_pipeline(),
     daemon=True,
 ).start()
+
+# mvp니까~
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000",
-                   "http://localhost:3300", "http://127.0.0.1:3300"],
+    allow_origins=["*"], 
     allow_methods=["*"], allow_headers=["*"],
 )
 if os.path.isdir(ASSETS_DIR):

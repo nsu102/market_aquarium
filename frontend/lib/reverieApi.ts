@@ -21,10 +21,11 @@ import { Agent } from "@/mock_data/agents";
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-/** Absolute URL for a static asset served by api_server (e.g. "assets/..."). */
+/** Asset URL — serve from the frontend's own /public folder (Next.js static),
+ *  avoiding ngrok bandwidth limits on the backend. */
 export function assetUrl(path: string): string {
   const clean = path.replace(/^\//, "");
-  return `${API_BASE}/${clean}`;
+  return `/${clean}`;
 }
 
 /* ── Types ── */
@@ -136,7 +137,10 @@ export interface GamePersona {
 /* ── Request helpers ── */
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: "no-store",
+    headers: { "ngrok-skip-browser-warning": "1" },
+  });
   if (!res.ok) {
     throw new Error(`GET ${path} 실패: ${res.status} ${res.statusText}`);
   }
@@ -146,7 +150,7 @@ async function getJson<T>(path: string): Promise<T> {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
     body: JSON.stringify(body),
     cache: "no-store",
   });
