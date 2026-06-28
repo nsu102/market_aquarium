@@ -118,5 +118,4 @@ node_modules
 
 # runtime-generated live sims (not committed)
 environment/frontend_server/storage/market_*/
-frontend/public/assets
-frontend/public/img
+.env.local
