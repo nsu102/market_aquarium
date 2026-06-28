@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Post } from "@/mock_data/posts";
 import { GameEvent } from "@/mock_data/events";
 import {
@@ -23,7 +23,7 @@ const PROFILE_IMG: Record<string, string> = Object.fromEntries(
   AGENT_PROFILES.map((p) => [p.id, p.profile])
 );
 
-const tabs = ["전체", "BTC", "ETH", "SOL"];
+// ponytail: tabs derived from actual post assets, not hardcoded
 
 /** impact → notice 배너 톤 (2-Hue) */
 const IMPACT_STYLES: Record<
@@ -42,6 +42,10 @@ export default function BoardFeed({
   posts: Post[];
   events?: GameEvent[];
 }) {
+  const tabs = useMemo(() => {
+    const symbols = new Set(posts.filter((p) => p.agentId !== "system" && p.agentId !== "시스템" && p.asset).map((p) => p.asset!));
+    return ["전체", ...Array.from(symbols).sort()];
+  }, [posts]);
   const [activeTab, setActiveTab] = useState("전체");
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
