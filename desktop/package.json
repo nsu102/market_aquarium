@@ -1,0 +1,34 @@
+{
+  "name": "market-aquarium-desktop",
+  "version": "1.0.0",
+  "description": "Market Aquarium - Desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.marketaquarium.desktop",
+    "productName": "Market Aquarium",
+    "icon": "icon.ico",
+    "mac": {
+      "icon": "icon.icns",
+      "target": "dmg"
+    },
+    "win": {
+      "icon": "icon.ico",
+      "target": "nsis"
+    },
+    "linux": {
+      "icon": "icon.png",
+      "target": "AppImage"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}
