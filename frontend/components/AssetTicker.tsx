@@ -10,6 +10,7 @@ const MAX_ASSETS = 8;
 
 interface Props {
   assets: Asset[];
+  onSelect?: (asset: Asset) => void;
 }
 
 /** Tiny inline price sparkline from an asset's priceHistory. */
@@ -52,11 +53,11 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
  * small sparkline, laid out in a single horizontal row. Caps the displayed
  * default assets at 8.
  */
-export default function AssetTicker({ assets }: Props) {
+export default function AssetTicker({ assets, onSelect }: Props) {
   const shown = assets.slice(0, MAX_ASSETS);
 
   return (
-    <div className="shrink-0 h-[88px] border-t-2 border-black bg-pixel-table px-3 flex items-center gap-2 overflow-x-auto">
+    <div className="shrink-0 h-[96px] border-t-2 border-black bg-pixel-table px-3 flex items-center gap-2 overflow-x-auto">
       {shown.length === 0 ? (
         <div className="text-[12px] text-pixel-muted font-bold px-2">시세 데이터 대기 중...</div>
       ) : (
@@ -65,28 +66,30 @@ export default function AssetTicker({ assets }: Props) {
           const color = up ? UP : DOWN;
           const TrendIcon = up ? TrendingUp : TrendingDown;
           return (
-            <div
+            <button
               key={a.symbol}
-              className="flex items-center gap-2 shrink-0 border-2 border-black rounded-xl bg-white px-2.5 py-1.5"
+              onClick={() => onSelect?.(a)}
+              className="flex items-center gap-2 shrink-0 w-[172px] h-[68px] overflow-hidden border-2 border-black rounded-xl bg-white px-2.5 tabular-nums cursor-pointer hover:bg-pixel-path active:translate-x-[1px] active:translate-y-[1px]"
             >
-              <div className="min-w-0">
-                <div className="text-[11px] font-bold text-black truncate max-w-[88px]">
+              {/* name / price / change stacked so change% never overlaps the chart */}
+              <div className="flex-1 min-w-0 flex flex-col justify-center leading-tight text-left">
+                <div className="text-[11px] font-bold text-black truncate">
                   {a.name || a.symbol}
                 </div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-[12px] font-bold text-black">{formatKRW(a.price)}</span>
-                  <span
-                    className="text-[10px] font-bold inline-flex items-center gap-0.5"
-                    style={{ color }}
-                  >
-                    <TrendIcon size={10} />
-                    {up ? "+" : ""}
-                    {a.change24h.toFixed(1)}%
-                  </span>
+                <div className="text-[14px] font-bold text-black truncate">
+                  {formatKRW(a.price)}
+                </div>
+                <div
+                  className="text-[10px] font-bold inline-flex items-center gap-0.5"
+                  style={{ color }}
+                >
+                  <TrendIcon size={10} />
+                  {up ? "+" : ""}
+                  {a.change24h.toFixed(1)}%
                 </div>
               </div>
               <Sparkline data={a.priceHistory} color={color} />
-            </div>
+            </button>
           );
         })
       )}
