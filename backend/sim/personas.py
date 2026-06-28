@@ -45,6 +45,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["BTC", "ETH", "DOGE", "SHIB", "XRP"],
         default_fear=85,
         default_greed=15,
+        default_confidence=25,
+        default_excitement=72,
+        default_trust=35,
         herd_sensitivity=0.9,
         rumor_sensitivity=0.8,
         fear_threshold=70,
@@ -64,6 +67,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["SOL", "PEPE", "WIF", "BONK", "DOGE"],
         default_fear=20,
         default_greed=90,
+        default_confidence=72,
+        default_excitement=85,
+        default_trust=45,
         herd_sensitivity=0.85,
         rumor_sensitivity=0.6,
     ),
@@ -82,6 +88,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["BTC", "ETH", "LINK", "DOT", "ATOM"],
         default_fear=30,
         default_greed=40,
+        default_confidence=72,
+        default_excitement=24,
+        default_trust=72,
         herd_sensitivity=0.2,
         rumor_sensitivity=0.2,
     ),
@@ -100,6 +109,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["BTC", "ETH", "SOL", "ARB", "OP"],
         default_fear=45,
         default_greed=55,
+        default_confidence=75,
+        default_excitement=20,
+        default_trust=66,
         herd_sensitivity=0.3,
         rumor_sensitivity=0.3,
     ),
@@ -118,6 +130,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["BTC", "ETH", "SOL", "XRP", "LINK"],
         default_fear=10,
         default_greed=70,
+        default_confidence=86,
+        default_excitement=20,
+        default_trust=70,
         herd_sensitivity=0.1,
         rumor_sensitivity=0.2,
     ),
@@ -136,6 +151,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["BTC", "ETH", "AAVE", "UNI", "MKR"],
         default_fear=25,
         default_greed=60,
+        default_confidence=70,
+        default_excitement=46,
+        default_trust=30,
         herd_sensitivity=0.05,
         rumor_sensitivity=0.3,
     ),
@@ -154,6 +172,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["BTC", "ETH"],
         default_fear=50,
         default_greed=50,
+        default_confidence=50,
+        default_excitement=28,
+        default_trust=80,
         herd_sensitivity=0.0,
         rumor_sensitivity=0.1,
     ),
@@ -172,6 +193,9 @@ PERSONA_POOL: list[Persona] = [
         portfolio_symbol_pool=["DOGE", "SHIB", "PEPE", "BONK"],
         default_fear=40,
         default_greed=65,
+        default_confidence=64,
+        default_excitement=82,
+        default_trust=12,
         herd_sensitivity=0.5,
         rumor_sensitivity=0.95,
     ),
@@ -180,7 +204,55 @@ PERSONA_POOL: list[Persona] = [
 # The MVP default 6 (PRD §0 #9) -- matches the frontend's 6 default profiles.
 DEFAULT_PERSONA_IDS = ["panic", "fomo", "value", "quant", "whale", "contrarian"]
 
+# --------------------------------------------------------------------------- #
+# SNS-only crowd (D2): extra characters that live ONLY on the board. They never
+# appear on the map, never trade, never move price. Each round they MUST write a
+# post/comment and cast like/dislike votes -- they are the "관중" that makes the
+# feed feel alive. Types are reused from AgentType only to flavour their tone.
+# --------------------------------------------------------------------------- #
+def _sns(persona_id, alias, type_, color, innate, currently,
+         fear=50, greed=50, confidence=50, excitement=50, trust=50) -> Persona:
+    return Persona(
+        persona_id=persona_id, alias=alias, type=type_,
+        sprite="", color=color,
+        innate=innate, learned="lurks the board all day, never trades",
+        currently=currently, lifestyle="comments and reacts, never trades",
+        daily_req="react to the feed with one punchy post/comment and vote",
+        cash_pool=[0], portfolio_symbol_pool=[],
+        default_fear=fear, default_greed=greed,
+        default_confidence=confidence, default_excitement=excitement, default_trust=trust,
+    )
+
+
+SNS_PERSONA_POOL: list[Persona] = [
+    _sns("sns_ant", "불장기원 개미", AgentType.FOMO_TRADER, "#E0843F",
+         "hopeful retail, hypes every green candle", "praying for a pump",
+         fear=35, greed=80, confidence=55, excitement=82, trust=50),
+    _sns("sns_troll", "주식방 악플러", AgentType.CONSPIRACY, "#C0506A",
+         "provocative troll, loves to dunk on bad calls", "looking for someone to mock",
+         fear=30, greed=55, confidence=80, excitement=75, trust=15),
+    _sns("sns_newbie", "코린이 뉴비", AgentType.FOMO_TRADER, "#E6B84A",
+         "anxious beginner, asks naive questions", "confused and scared of missing out",
+         fear=70, greed=55, confidence=20, excitement=70, trust=60),
+    _sns("sns_guru", "익명 고수", AgentType.VALUE_INVESTOR, "#4F86C6",
+         "smug veteran, drops one-liners", "judging everyone's moves",
+         fear=25, greed=45, confidence=88, excitement=25, trust=60),
+    _sns("sns_cheer", "치어리더", AgentType.FOMO_TRADER, "#5BB05B",
+         "relentless optimist, cheers any holder", "hyping the room up",
+         fear=15, greed=70, confidence=80, excitement=90, trust=65),
+    _sns("sns_doomer", "공포팔이", AgentType.PANIC_SELLER, "#B5564A",
+         "doom-poster, sees a crash everywhere", "spreading dread",
+         fear=90, greed=20, confidence=30, excitement=78, trust=25),
+    _sns("sns_quantfan", "지표충", AgentType.QUANT, "#8B6DB0",
+         "posts RSI/MACD takes, acts technical", "reading the charts out loud",
+         fear=45, greed=55, confidence=72, excitement=22, trust=68),
+    _sns("sns_contra", "청개구리", AgentType.CONTRARIAN, "#5BA88C",
+         "contrarian gadfly, fades the room", "doing the opposite of the crowd",
+         fear=30, greed=55, confidence=70, excitement=45, trust=28),
+]
+
 _POOL_BY_ID = {p.persona_id: p for p in PERSONA_POOL}
+_SNS_BY_ID = {p.persona_id: p for p in SNS_PERSONA_POOL}
 
 
 def get_persona(persona_id: str) -> Persona:
@@ -225,6 +297,9 @@ def build_agent(persona: Persona, prices: dict[str, float], rng: random.Random) 
         portfolio=portfolio,
         fear=persona.default_fear,
         greed=persona.default_greed,
+        confidence=persona.default_confidence,
+        excitement=persona.default_excitement,
+        trust=persona.default_trust,
         lastAction=Action.HOLD.value,
         location=Location.HOME,
         position=Position(),
@@ -258,3 +333,36 @@ def sample_agents(
             extra = [p.persona_id for p in PERSONA_POOL if p.persona_id not in DEFAULT_PERSONA_IDS]
             persona_ids = (DEFAULT_PERSONA_IDS + extra)[:n]
     return [build_agent(_POOL_BY_ID[pid], prices, rng) for pid in persona_ids]
+
+
+def build_sns_agent(persona: Persona) -> Agent:
+    """A board-only spectator: no portfolio, no map presence, never trades."""
+    return Agent(
+        id=persona.persona_id,
+        alias=persona.alias,
+        type=persona.type.value,
+        sprite=persona.sprite,
+        cash=0.0,
+        portfolio=[],
+        fear=persona.default_fear,
+        greed=persona.default_greed,
+        confidence=persona.default_confidence,
+        excitement=persona.default_excitement,
+        trust=persona.default_trust,
+        lastAction=Action.HOLD.value,
+        location=Location.COMMUNITY,
+        position=Position(),
+        color=persona.color,
+        innate=persona.innate,
+        learned=persona.learned,
+        currently=persona.currently,
+        lifestyle=persona.lifestyle,
+        daily_req=persona.daily_req,
+        sns_only=True,
+    )
+
+
+def sample_sns_agents(n: int = 6) -> list[Agent]:
+    """The first ``n`` SNS-only spectators (D2: as many as the playing agents)."""
+    pool = SNS_PERSONA_POOL[: max(0, n)]
+    return [build_sns_agent(p) for p in pool]

@@ -109,6 +109,10 @@ export interface ReverieMeta {
   events?: GameEvent[];
   round?: number;
   agents?: Agent[];
+  // SNS-only spectators (D2): board avatars, never on the map.
+  sns_agents?: Agent[];
+  // Per-agent change of each emotion axis vs the start of the round (D3).
+  emotion_deltas?: Record<string, Record<string, number>>;
   plans?: AgentPlan[];
   round_report?: RoundReportMeta | null;
   finished?: boolean;

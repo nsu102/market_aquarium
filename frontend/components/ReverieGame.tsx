@@ -255,6 +255,10 @@ export default function ReverieGame({ simCode, uid, onTick, controlsRef, onSelec
       camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
       camera.setZoom(1.3);
       cursors = this.input.keyboard!.createCursorKeys();
+      // Don't preventDefault on SPACE/arrows: capturing them would steal the
+      // space bar (and arrows) from text inputs like the event-input modal.
+      // Key state is still polled via isDown below, which doesn't need capture.
+      this.input.keyboard!.clearCaptures();
 
       // *** MOUSE NAVIGATION: drag to pan, wheel to zoom ***
       this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {

@@ -7,6 +7,14 @@ import {
   Repeat,
   Megaphone,
   User,
+  Flame,
+  Skull,
+  Baby,
+  GraduationCap,
+  PartyPopper,
+  CloudRain,
+  Activity,
+  Bird,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,9 +40,33 @@ export const AGENT_ICONS: Record<string, LucideIcon> = {
   // 역발상 투자자
   contrarian: Repeat,
   "역발상 투자자": Repeat,
+  // 뉴스 요약 봇 (선정 외에도 등장 가능)
+  news_bot: Megaphone,
+  news: Megaphone,
+  "뉴스 요약 봇": Megaphone,
   // 시스템(속보) 게시물
   system: Megaphone,
   시스템: Megaphone,
+  // 사용자 본인
+  user: User,
+  나: User,
+  // SNS 전용 관중 (D2)
+  sns_ant: Flame,
+  불장기원개미: Flame,
+  sns_troll: Skull,
+  주식방악플러: Skull,
+  sns_newbie: Baby,
+  코린이뉴비: Baby,
+  sns_guru: GraduationCap,
+  익명고수: GraduationCap,
+  sns_cheer: PartyPopper,
+  치어리더: PartyPopper,
+  sns_doomer: CloudRain,
+  공포팔이: CloudRain,
+  sns_quantfan: Activity,
+  지표충: Activity,
+  sns_contra: Bird,
+  청개구리: Bird,
   // 폴백
   default: User,
 };
