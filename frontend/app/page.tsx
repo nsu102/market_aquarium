@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import AgentSidebar from "@/components/AgentSidebar";
 import AssetTicker from "@/components/AssetTicker";
+import AssetModal from "@/components/AssetModal";
 import BoardFeed from "@/components/BoardFeed";
 import RoundReport from "@/components/RoundReport";
 import OverallReport from "@/components/OverallReport";
@@ -62,6 +63,7 @@ export default function Home() {
   const [boardOpen, setBoardOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   // Transient per-agent trade alerts for the dock (agent.id -> action), set on a
   // live trade and cleared after a short hold.
@@ -272,7 +274,7 @@ export default function Home() {
 
             {/* Discord-style voice overlay roster (floats over the map, top-left) */}
             {marketOpen && (
-              <div className="absolute top-14 left-2 z-30 w-[210px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1">
+              <div className="absolute top-14 left-2 z-30 w-[260px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1">
                 <AgentSidebar agents={agents} alerts={tradeAlerts} onSelect={setSelectedAgent} />
               </div>
             )}
@@ -295,8 +297,8 @@ export default function Home() {
         </div>
 
         {/* Bottom dock: market price ticker (name / price / change% + sparkline),
-            capped at 8 assets. */}
-        <AssetTicker assets={marketData?.assets ?? []} />
+            capped at 8 assets. Click an asset for its chart + profile modal. */}
+        <AssetTicker assets={marketData?.assets ?? []} onSelect={setSelectedAsset} />
       </div>
 
       {/* Right column: board feed, full height */}
@@ -331,6 +333,10 @@ export default function Home() {
 
       {selectedAgent && (
         <AgentDetail agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
+      )}
+
+      {selectedAsset && (
+        <AssetModal asset={selectedAsset} onClose={() => setSelectedAsset(null)} />
       )}
 
       {activeEvent && (
