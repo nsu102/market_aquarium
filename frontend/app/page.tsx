@@ -457,9 +457,9 @@ export default function Home() {
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-surface-primary">
       {/* Top: map + board side by side */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex flex-col md:flex-row min-h-0">
         {/* Map + overlays */}
-        <main className="relative flex-1 min-w-0">
+        <main className="relative flex-1 min-w-0 min-h-[50vh] md:min-h-0">
           {canonicalSim ? (
             <ReverieGame
               simCode={canonicalSim}
@@ -479,7 +479,7 @@ export default function Home() {
 
           {/* Discord-style voice overlay roster (floats over the map, top-left) */}
           {marketOpen && (
-            <div className="absolute top-14 left-2 z-30 w-[260px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1">
+            <div className="absolute top-14 left-2 z-30 w-[180px] md:w-[260px] max-h-[calc(100%-5rem)] overflow-y-auto pr-1 hidden sm:block">
               <AgentSidebar agents={agents} alerts={tradeAlerts} onSelect={setSelectedAgent} />
             </div>
           )}
@@ -507,7 +507,7 @@ export default function Home() {
 
         {/* Right column: board feed */}
         {boardOpen && (
-          <aside className="w-[320px] shrink-0 border-l-2 border-black overflow-hidden">
+          <aside className="w-full md:w-[320px] shrink-0 border-t-2 md:border-t-0 md:border-l-2 border-black overflow-hidden max-h-[40vh] md:max-h-none">
             <BoardFeed
               posts={posts}
               events={events}
@@ -578,6 +578,7 @@ export default function Home() {
               setPendingOverride(override);
               setStrategyModalOpen(false);
             }}
+            onCancel={() => { setStrategyModalOpen(false); setNeedEvent(false); }}
             onKeyboardEnabled={handleKeyboardEnabled}
           />
         );

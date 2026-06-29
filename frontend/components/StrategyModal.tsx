@@ -35,6 +35,7 @@ interface Props {
     sprite?: string;
   };
   onConfirm: (override: AgentOverride) => void;
+  onCancel?: () => void;
   onKeyboardEnabled?: (on: boolean) => void;
 }
 
@@ -95,7 +96,7 @@ type EmotionKey = (typeof EMOTION_SLIDERS)[number]["key"];
 
 /* ── Component ── */
 
-export default function StrategyModal({ round, userAgent, onConfirm, onKeyboardEnabled }: Props) {
+export default function StrategyModal({ round, userAgent, onConfirm, onCancel, onKeyboardEnabled }: Props) {
   const [emotions, setEmotions] = useState<Record<EmotionKey, number>>({
     fear: userAgent.fear, greed: userAgent.greed,
     confidence: userAgent.confidence, excitement: userAgent.excitement, trust: userAgent.trust,
@@ -140,8 +141,8 @@ export default function StrategyModal({ round, userAgent, onConfirm, onKeyboardE
   const weightTotal = Object.values(portfolioWeights).reduce((s, v) => s + v, 0);
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg w-[520px] max-h-[88vh] flex flex-col animate-pixel-pop overflow-hidden">
+    <div className="fixed inset-0 z-[120] bg-black/60 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg w-full max-w-[520px] max-h-[88vh] flex flex-col animate-pixel-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
 
         {/* ── Header ── */}
         <div className="flex items-center gap-3 px-5 py-3 bg-pixel-table border-b-2 border-black">
@@ -173,7 +174,7 @@ export default function StrategyModal({ round, userAgent, onConfirm, onKeyboardE
           {/* Section 1: Strategy Presets */}
           <div className="px-5 pt-4 pb-3">
             <SectionTitle label="전략 프리셋" />
-            <div className="grid grid-cols-5 gap-2 mt-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mt-2">
               {STRATEGY_PRESETS.map((p) => {
                 const Icon = p.icon;
                 const active = activePreset === p.label;

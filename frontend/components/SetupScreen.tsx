@@ -250,7 +250,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
       <div className="absolute inset-0 bg-slate-900/60" />
 
       {/* ═══ Window ═══ */}
-      <div className="relative z-10 flex flex-col w-[860px] h-[560px] max-w-[92vw] max-h-[88vh] mx-auto overflow-hidden border-2 border-black rounded-2xl shadow-pixel-lg">
+      <div className="relative z-10 flex flex-col w-[860px] h-[560px] max-w-[95vw] max-h-[92vh] mx-auto overflow-hidden border-2 border-black rounded-2xl shadow-pixel-lg">
 
         {/* Title bar */}
         <div className="h-10 bg-pixel-table border-b-2 border-black flex items-center px-4 gap-3 flex-shrink-0">
@@ -263,14 +263,14 @@ export default function SetupScreen({ onStart, onResume }: Props) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 flex overflow-hidden bg-white">
+        <div className="flex-1 flex flex-col sm:flex-row overflow-hidden bg-white">
 
           {/* Left: list */}
-          <div className="w-[160px] flex-shrink-0 border-r-2 border-black flex flex-col bg-white">
+          <div className="w-full sm:w-[160px] flex-shrink-0 border-b-2 sm:border-b-0 sm:border-r-2 border-black flex flex-col bg-white max-h-[120px] sm:max-h-none overflow-y-auto sm:overflow-visible">
             <div className="px-3 py-2 border-b-2 border-black">
               <div className="text-[9px] text-pixel-gold tracking-[0.2em] font-bold">COLONY</div>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto flex sm:flex-col flex-row sm:overflow-x-visible overflow-x-auto">
               {agents.map((agent, idx) => {
                 const sel = idx === selectedIdx;
                 return (
@@ -304,7 +304,7 @@ export default function SetupScreen({ onStart, onResume }: Props) {
           </div>
 
           {/* Center: portrait */}
-          <div className="w-[220px] flex-shrink-0 border-r-2 border-black flex flex-col bg-white">
+          <div className="hidden sm:flex w-[220px] flex-shrink-0 border-r-2 border-black flex-col bg-white">
             <div className="flex-1 flex flex-col items-center justify-center px-4 relative">
               <button
                 onClick={() => updateAgent({ enabled: !selected.enabled })}

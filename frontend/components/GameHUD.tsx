@@ -143,7 +143,7 @@ export default function GameHUD({
         {/* Speech-bubble dialog — pops up from the toolbar */}
         {forceEventOpen && (
           <div className="mb-2 relative">
-            <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg w-[380px] overflow-hidden animate-pixel-pop">
+            <div className="bg-white border-2 border-black rounded-2xl shadow-pixel-lg w-[calc(100vw-2rem)] sm:w-[380px] overflow-hidden animate-pixel-pop">
               {/* Header */}
               <div className="flex items-center gap-2 px-3 py-2 bg-pixel-table border-b-2 border-black">
                 <Zap size={13} className="text-black" />

@@ -118,6 +118,31 @@ def _round_markdown(
     lines.append(f"# 라운드 {round} 리포트")
     lines.append("")
 
+    # --- Player focus section (top of report) --------------------------------
+    if agents:
+        player = next((a for a in agents if a.id == "player"), None)
+        if player:
+            _ed = emotion_deltas or {}
+            _pd = _ed.get("player", {})
+            _pt = next((t for t in trades if t.agent_id == "player"), None)
+            _p_action = _ACTION_KR.get(player.lastAction, player.lastAction or "-")
+            lines.append("## 내 에이전트 분석")
+            lines.append("")
+            lines.append(f"**{player.alias}** 의 이번 라운드 행동: **{_p_action}**"
+                         + (f" ({_pt.symbol})" if _pt and _pt.symbol else ""))
+            lines.append("")
+            lines.append("| 감정 | 현재 | 변화 |")
+            lines.append("| --- | --- | --- |")
+            for _axis, _label in [("fear", "공포"), ("greed", "탐욕"),
+                                  ("confidence", "자신감"), ("excitement", "흥분"),
+                                  ("trust", "신뢰")]:
+                _val = getattr(player, _axis, 50)
+                _delta = _pd.get(_axis, 0)
+                lines.append(f"| {_label} | {_val:.0f} | {_fmt_delta(_delta)} |")
+            lines.append("")
+            lines.append(_player_insight(player, share, _pt))
+            lines.append("")
+
     # --- Market indices section --------------------------------------------
     lines.append("## 시장 심리 지표")
     lines.append("")
@@ -177,32 +202,6 @@ def _round_markdown(
                 f" | {a.trust:.0f}({_fmt_delta(d.get('trust', 0))}) |"
             )
         lines.append("")
-
-    # --- Player focus section ------------------------------------------------
-    if agents:
-        player = next((a for a in agents if a.id == "player"), None)
-        if player:
-            ed = emotion_deltas or {}
-            pd = ed.get("player", {})
-            pt = next((t for t in trades if t.agent_id == "player"), None)
-            p_action = _ACTION_KR.get(player.lastAction, player.lastAction or "-")
-            lines.append("## 내 에이전트 분석")
-            lines.append("")
-            lines.append(f"**{player.alias}** 의 이번 라운드 행동: **{p_action}**"
-                         + (f" ({pt.symbol})" if pt and pt.symbol else ""))
-            lines.append("")
-            lines.append("| 감정 | 현재 | 변화 |")
-            lines.append("| --- | --- | --- |")
-            for axis, label in [("fear", "공포"), ("greed", "탐욕"),
-                                ("confidence", "자신감"), ("excitement", "흥분"),
-                                ("trust", "신뢰")]:
-                val = getattr(player, axis, 50)
-                delta = pd.get(axis, 0)
-                lines.append(f"| {label} | {val:.0f} | {_fmt_delta(delta)} |")
-            lines.append("")
-            # Educational insight based on player state
-            lines.append(_player_insight(player, share, pt))
-            lines.append("")
 
     # --- Trade summary -----------------------------------------------------
     lines.append("## 매매 요약")
